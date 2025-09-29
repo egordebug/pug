@@ -8,9 +8,6 @@
             overflow: hidden;
         }
         video {
-            position: fixed;
-            top: 0;
-            left: 0;
             width: 100vw;
             height: 100vh;
             object-fit: cover;
@@ -19,6 +16,21 @@
 </head>
 
 <body>
-    <video src="mops.mp4" autoplay loop controls></video>
+    <video id="myVideo" src="mops.mp4" autoplay loop controls></video>
+
+    <script>
+        const video = document.getElementById("myVideo");
+
+        // По клику уходим в fullscreen
+        video.addEventListener("click", () => {
+            if (video.requestFullscreen) {
+                video.requestFullscreen();
+            } else if (video.webkitRequestFullscreen) { // Safari
+                video.webkitRequestFullscreen();
+            } else if (video.msRequestFullscreen) { // IE/Edge
+                video.msRequestFullscreen();
+            }
+        });
+    </script>
 </body>
 </html>
