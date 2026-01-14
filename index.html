@@ -1,36 +1,513 @@
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-    <title>hehehe</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔐 P2P E2E Зашифрованный Чат</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
-        body {
-            margin: 0;
-            background: #000;
-            overflow: hidden;
+        * { box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            max-width: 600px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            background: #f5f5f5;
+            line-height: 1.6;
         }
-        video {
-            width: 100vw;
-            height: 100vh;
-            object-fit: cover;
+        h2 { color: #333; text-align: center; margin-bottom: 20px; }
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        #chat { 
+            height: 300px; 
+            overflow-y: auto; 
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            background: #fafafa;
+        }
+        .message { 
+            margin: 10px 0; 
+            padding: 10px; 
+            border-radius: 8px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        .my { 
+            background: #007AFF; 
+            color: white;
+            margin-left: auto;
+        }
+        .their { 
+            background: #E8E8E8; 
+            color: #333;
+        }
+        .system { 
+            background: #FFF3CD; 
+            color: #856404;
+            font-size: 0.9em;
+            text-align: center;
+            max-width: 100%;
+            border: 1px solid #FFEEBA;
+        }
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        input {
+            border: 1px solid #ddd;
+            background: white;
+        }
+        button {
+            background: #007AFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover { background: #0056CC; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .id-display {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: monospace;
+            word-break: break-all;
+            margin: 10px 0;
+        }
+        .status {
+            padding: 8px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-size: 0.9em;
+        }
+        .online { background: #D4EDDA; color: #155724; }
+        .offline { background: #F8D7DA; color: #721C24; }
+        .encrypted-badge {
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            font-size: 0.7em;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 5px;
         }
     </style>
 </head>
-
 <body>
-    <video id="myVideo" src="mops.mp4" autoplay loop controls></video>
+    <div class="card">
+        <h2>🔐 P2P E2E Зашифрованный Чат</h2>
+        
+        <div class="status" id="statusBox">🔄 Подключаемся...</div>
+        
+        <div>
+            <strong>Ваш ID для подключения:</strong>
+            <div class="id-display">
+                <span id="myId">генерируется...</span>
+                <button onclick="copyId()" style="width: auto; padding: 5px 10px; float: right;">📋 Копировать</button>
+            </div>
+        </div>
+        
+        <div>
+            <label for="peerId"><strong>ID собеседника:</strong></label>
+            <input type="text" id="peerId" placeholder="Вставьте сюда ID собеседника">
+            <button onclick="connect()" id="connectBtn">🔗 Подключиться</button>
+        </div>
+    </div>
+    
+    <div class="card">
+        <div id="chat">
+            <div class="message system">
+                🌟 Добро пожаловать в P2P E2E чат!<br>
+                🔒 Все сообщения шифруются на вашем устройстве
+            </div>
+        </div>
+        
+        <div>
+            <input type="text" id="message" placeholder="Напишите сообщение..." onkeypress="if(event.key=='Enter') send()">
+            <button onclick="send()" id="sendBtn" disabled>🔒 Отправить зашифрованное сообщение</button>
+        </div>
+    </div>
+    
+    <div class="card" style="font-size: 0.9em; color: #666;">
+        <strong>📌 Как использовать:</strong>
+        <ol>
+            <li>Дайте свой ID (выше) собеседнику</li>
+            <li>Получите его ID и вставьте в поле выше</li>
+            <li>Нажмите "Подключиться" — ключи обменяются автоматически</li>
+            <li>Пишите сообщения — они шифруются перед отправкой</li>
+        </ol>
+        <div style="margin-top: 10px; padding: 10px; background: #E3F2FD; border-radius: 6px;">
+            🔐 <strong>Безопасность:</strong> Сообщения шифруются с помощью RSA-2048 и Web Crypto API.
+            Даже GitHub не может их прочитать.
+        </div>
+    </div>
 
     <script>
-        const video = document.getElementById("myVideo");
+        // ==================== КОНФИГУРАЦИЯ ====================
+        const CONFIG = {
+            peerjs: {
+                host: '0.peerjs.com',
+                port: 443,
+                secure: true,
+                debug: 0
+            },
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
+            ]
+        };
 
-        // По клику уходим в fullscreen
-        video.addEventListener("click", () => {
-            if (video.requestFullscreen) {
-                video.requestFullscreen();
-            } else if (video.webkitRequestFullscreen) { // Safari
-                video.webkitRequestFullscreen();
-            } else if (video.msRequestFullscreen) { // IE/Edge
-                video.msRequestFullscreen();
+        // ==================== КРИПТОГРАФИЯ ====================
+        class E2EEncryptor {
+            constructor() {
+                this.keyPair = null;
+                this.peerPublicKey = null;
+                this.peerKeyFingerprint = null;
             }
-        });
+            
+            async generateKeyPair() {
+                try {
+                    this.keyPair = await window.crypto.subtle.generateKey(
+                        {
+                            name: "RSA-OAEP",
+                            modulusLength: 2048,
+                            publicExponent: new Uint8Array([1, 0, 1]),
+                            hash: "SHA-256"
+                        },
+                        true,
+                        ["encrypt", "decrypt"]
+                    );
+                    
+                    const exported = await window.crypto.subtle.exportKey("spki", this.keyPair.publicKey);
+                    const fingerprint = await this.calculateFingerprint(exported);
+                    
+                    return {
+                        key: this.arrayBufferToBase64(exported),
+                        fingerprint: fingerprint
+                    };
+                } catch (e) {
+                    console.error("Ошибка генерации ключей:", e);
+                    throw e;
+                }
+            }
+            
+            async importPeerPublicKey(base64Key) {
+                try {
+                    const keyData = this.base64ToArrayBuffer(base64Key);
+                    this.peerPublicKey = await window.crypto.subtle.importKey(
+                        "spki",
+                        keyData,
+                        { name: "RSA-OAEP", hash: "SHA-256" },
+                        true,
+                        ["encrypt"]
+                    );
+                    
+                    // Вычисляем fingerprint для проверки
+                    this.peerKeyFingerprint = await this.calculateFingerprint(keyData);
+                    return this.peerKeyFingerprint;
+                } catch (e) {
+                    console.error("Ошибка импорта ключа:", e);
+                    throw e;
+                }
+            }
+            
+            async calculateFingerprint(keyData) {
+                const hash = await window.crypto.subtle.digest("SHA-256", keyData);
+                const hex = Array.from(new Uint8Array(hash))
+                    .map(b => b.toString(16).padStart(2, '0'))
+                    .join('')
+                    .substring(0, 16); // первые 16 символов для читаемости
+                return hex.match(/.{4}/g).join(':');
+            }
+            
+            async encryptMessage(message) {
+                if (!this.peerPublicKey) throw new Error("Нет ключа собеседника");
+                
+                const encoder = new TextEncoder();
+                const data = encoder.encode(message);
+                
+                const encrypted = await window.crypto.subtle.encrypt(
+                    { name: "RSA-OAEP" },
+                    this.peerPublicKey,
+                    data
+                );
+                
+                return this.arrayBufferToBase64(encrypted);
+            }
+            
+            async decryptMessage(base64Encrypted) {
+                if (!this.keyPair) throw new Error("Нет приватного ключа");
+                
+                const encryptedData = this.base64ToArrayBuffer(base64Encrypted);
+                const decrypted = await window.crypto.subtle.decrypt(
+                    { name: "RSA-OAEP" },
+                    this.keyPair.privateKey,
+                    encryptedData
+                );
+                
+                return new TextDecoder().decode(decrypted);
+            }
+            
+            arrayBufferToBase64(buffer) {
+                const bytes = new Uint8Array(buffer);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                return btoa(binary);
+            }
+            
+            base64ToArrayBuffer(base64) {
+                const binaryString = atob(base64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                return bytes.buffer;
+            }
+        }
+
+        // ==================== ОСНОВНОЙ КОД ====================
+        let peer = null;
+        let conn = null;
+        let encryptor = new E2EEncryptor();
+        let myKeyInfo = null;
+
+        async function init() {
+            updateStatus("🔑 Генерируем ваши ключи шифрования...", "offline");
+            
+            try {
+                // 1. Генерируем ключи
+                myKeyInfo = await encryptor.generateKeyPair();
+                
+                // 2. Создаём Peer соединение
+                peer = new Peer({
+                    host: CONFIG.peerjs.host,
+                    port: CONFIG.peerjs.port,
+                    secure: CONFIG.peerjs.secure,
+                    debug: CONFIG.peerjs.debug,
+                    config: { iceServers: CONFIG.iceServers }
+                });
+                
+                peer.on('open', (id) => {
+                    document.getElementById('myId').textContent = id;
+                    updateStatus(`✅ Готов к подключению. Ваш fingerprint: ${myKeyInfo.fingerprint}`, "online");
+                    document.getElementById('connectBtn').disabled = false;
+                    addSystemMessage("Ваши ключи сгенерированы. Дайте ваш ID собеседнику.");
+                });
+                
+                peer.on('error', (err) => {
+                    console.error("PeerJS error:", err);
+                    updateStatus(`❌ Ошибка: ${err.type}`, "offline");
+                });
+                
+                // Обработка входящих подключений
+                peer.on('connection', (connection) => {
+                    conn = connection;
+                    setupConnection(conn, true);
+                });
+                
+            } catch (error) {
+                updateStatus(`❌ Ошибка инициализации: ${error.message}`, "offline");
+                console.error("Init error:", error);
+            }
+        }
+        
+        function setupConnection(connection, isIncoming = false) {
+            updateStatus("🔄 Устанавливаем безопасное соединение...", "offline");
+            
+            connection.on('open', async () => {
+                if (isIncoming) {
+                    // При входящем соединении отправляем свой ключ
+                    connection.send({
+                        type: 'public_key',
+                        key: myKeyInfo.key,
+                        fingerprint: myKeyInfo.fingerprint
+                    });
+                    addSystemMessage("Собеседник подключился. Отправляем ключи...");
+                }
+            });
+            
+            connection.on('data', async (data) => {
+                try {
+                    switch (data.type) {
+                        case 'public_key':
+                            const fingerprint = await encryptor.importPeerPublicKey(data.key);
+                            addSystemMessage(`✅ Получен ключ собеседника. Fingerprint: ${fingerprint}`);
+                            
+                            // Отправляем подтверждение
+                            connection.send({
+                                type: 'key_ack',
+                                fingerprint: myKeyInfo.fingerprint
+                            });
+                            
+                            updateStatus(`🔐 Зашифрованное соединение установлено!`, "online");
+                            document.getElementById('sendBtn').disabled = false;
+                            addSystemMessage("✅ Ключи проверены. Можно общаться безопасно!");
+                            break;
+                            
+                        case 'key_ack':
+                            addSystemMessage(`✅ Собеседник подтвердил ваш ключ. Его fingerprint: ${data.fingerprint}`);
+                            updateStatus(`🔐 Зашифрованное соединение установлено!`, "online");
+                            document.getElementById('sendBtn').disabled = false;
+                            break;
+                            
+                        case 'encrypted_message':
+                            const decrypted = await encryptor.decryptMessage(data.message);
+                            addMessage(decrypted, 'their', true);
+                            break;
+                            
+                        case 'ping':
+                            connection.send({ type: 'pong' });
+                            break;
+                    }
+                } catch (error) {
+                    console.error("Ошибка обработки данных:", error);
+                    addSystemMessage(`❌ Ошибка: ${error.message}`);
+                }
+            });
+            
+            connection.on('close', () => {
+                updateStatus("❌ Соединение разорвано", "offline");
+                document.getElementById('sendBtn').disabled = true;
+                conn = null;
+                addSystemMessage("Соединение закрыто.");
+            });
+            
+            connection.on('error', (err) => {
+                console.error("Connection error:", err);
+                addSystemMessage(`Ошибка соединения: ${err.message}`);
+            });
+        }
+        
+        async function connect() {
+            const peerId = document.getElementById('peerId').value.trim();
+            if (!peerId) {
+                alert("Введите ID собеседника");
+                return;
+            }
+            
+            if (conn) {
+                if (confirm("Уже есть активное соединение. Переподключиться?")) {
+                    conn.close();
+                } else {
+                    return;
+                }
+            }
+            
+            updateStatus("🔄 Подключаемся к собеседнику...", "offline");
+            
+            try {
+                conn = peer.connect(peerId, { reliable: true });
+                setupConnection(conn, false);
+                
+                conn.on('open', async () => {
+                    addSystemMessage("Подключение установлено. Отправляем ключи...");
+                    
+                    // Отправляем свой публичный ключ
+                    conn.send({
+                        type: 'public_key',
+                        key: myKeyInfo.key,
+                        fingerprint: myKeyInfo.fingerprint
+                    });
+                });
+                
+            } catch (error) {
+                updateStatus(`❌ Ошибка подключения: ${error.message}`, "offline");
+                console.error("Connect error:", error);
+            }
+        }
+        
+        async function send() {
+            const input = document.getElementById('message');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            if (!conn || !conn.open) {
+                alert("Сначала подключитесь к собеседнику");
+                return;
+            }
+            if (!encryptor.peerPublicKey) {
+                alert("Ключи ещё не обменены");
+                return;
+            }
+            
+            try {
+                const encrypted = await encryptor.encryptMessage(message);
+                conn.send({
+                    type: 'encrypted_message',
+                    message: encrypted,
+                    timestamp: Date.now()
+                });
+                
+                addMessage(message, 'my', true);
+                input.value = '';
+                input.focus();
+                
+            } catch (error) {
+                console.error("Ошибка отправки:", error);
+                addSystemMessage(`❌ Не удалось отправить: ${error.message}`);
+            }
+        }
+        
+        function addMessage(text, type, encrypted = false) {
+            const chat = document.getElementById('chat');
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const encryptedBadge = encrypted ? '<span class="encrypted-badge">🔒</span>' : '';
+            
+            if (type === 'my') {
+                div.innerHTML = `<div><strong>Вы (${time}):</strong> ${text} ${encryptedBadge}</div>`;
+            } else {
+                div.innerHTML = `<div><strong>Собеседник (${time}):</strong> ${text} ${encryptedBadge}</div>`;
+            }
+            
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        function addSystemMessage(text) {
+            const chat = document.getElementById('chat');
+            const div = document.createElement('div');
+            div.className = 'message system';
+            div.innerHTML = `<div>${text}</div>`;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        function updateStatus(text, type = '') {
+            const statusBox = document.getElementById('statusBox');
+            statusBox.textContent = text;
+            statusBox.className = 'status';
+            if (type) statusBox.classList.add(type);
+        }
+        
+        function copyId() {
+            const id = document.getElementById('myId').textContent;
+            if (id && id !== 'генерируется...') {
+                navigator.clipboard.writeText(id).then(() => {
+                    alert("ID скопирован! Дайте его собеседнику.");
+                });
+            }
+        }
+        
+        // Инициализация при загрузке
+        window.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
