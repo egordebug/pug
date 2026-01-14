@@ -1,513 +1,609 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🔐 P2P E2E Зашифрованный Чат</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Telegram P2P</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-            max-width: 600px; 
-            margin: 0 auto; 
-            padding: 20px; 
-            background: #f5f5f5;
-            line-height: 1.6;
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f1f1f1;
+            --bg-hover: #f4f4f5;
+            --bg-active: #3390ec;
+            --bg-msg-out: #eeffde;
+            --bg-msg-in: #ffffff;
+            --text-primary: #000000;
+            --text-secondary: #707579;
+            --text-meta: #aeb5bc;
+            --border: #dfe1e5;
+            --input-bg: #ffffff;
+            --scroll-thumb: #c4c9cc;
         }
-        h2 { color: #333; text-align: center; margin-bottom: 20px; }
-        .card {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            margin: 10px 0;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-primary: #17212b;
+                --bg-secondary: #0e1621;
+                --bg-hover: #202b36;
+                --bg-active: #2b5278;
+                --bg-msg-out: #2b5278;
+                --bg-msg-in: #182533;
+                --text-primary: #f5f5f5;
+                --text-secondary: #7f91a4;
+                --text-meta: #6c7883;
+                --border: #101921;
+                --input-bg: #17212b;
+                --scroll-thumb: #2f3841;
+            }
         }
-        #chat { 
-            height: 300px; 
-            overflow-y: auto; 
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 15px 0;
-            background: #fafafa;
+
+        * { margin: 0; padding: 0; box-sizing: border-box; outline: none; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg-primary); color: var(--text-primary); height: 100vh; overflow: hidden; display: flex; }
+        
+        /* Layout */
+        .app-container { display: flex; width: 100%; height: 100%; }
+        
+        /* Sidebar (Contacts) */
+        .sidebar { width: 350px; background: var(--bg-primary); border-right: 1px solid var(--border); display: flex; flex-direction: column; transition: transform 0.3s ease; z-index: 10; }
+        
+        .sidebar-header { padding: 15px; display: flex; align-items: center; gap: 10px; background: var(--bg-primary); }
+        .search-bar { flex: 1; background: var(--bg-secondary); padding: 8px 15px; border-radius: 22px; display: flex; align-items: center; gap: 10px; color: var(--text-secondary); cursor: text; border: 1px solid transparent; }
+        .search-bar:focus-within { border-color: #3390ec; background: var(--bg-primary); }
+        .search-bar input { border: none; background: transparent; width: 100%; color: var(--text-primary); font-size: 15px; }
+        
+        .my-id-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 18px; padding: 8px; border-radius: 50%; transition: 0.2s; }
+        .my-id-btn:hover { background: var(--bg-hover); color: #3390ec; }
+
+        .contact-list { flex: 1; overflow-y: auto; }
+        .contact-item { padding: 10px 15px; display: flex; align-items: center; gap: 15px; cursor: pointer; transition: 0.2s; }
+        .contact-item:hover { background: var(--bg-hover); }
+        .contact-item.active { background: var(--bg-active); }
+        .contact-item.active * { color: white !important; }
+        
+        .avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #66a6ff, #89f7fe); display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; font-size: 18px; flex-shrink: 0; }
+        .contact-info { flex: 1; min-width: 0; }
+        .contact-top { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .contact-name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .contact-time { font-size: 12px; color: var(--text-secondary); }
+        .contact-last-msg { font-size: 14px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        /* Main Chat Area */
+        .chat-area { flex: 1; display: flex; flex-direction: column; background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%239e9e9e' fill-opacity='0.08' fill-rule='evenodd'/%3E%3C/svg%3E"); background-color: var(--bg-secondary); position: relative; }
+        
+        .chat-header { padding: 10px 20px; background: var(--bg-primary); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 15px; cursor: default; }
+        .back-btn { display: none; font-size: 20px; color: var(--text-secondary); background: none; border: none; cursor: pointer; }
+        
+        .chat-title h3 { font-size: 16px; margin-bottom: 2px; }
+        .chat-status { font-size: 13px; color: var(--text-secondary); }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ccc; margin-right: 5px; }
+        .status-dot.online { background: #00c853; }
+        
+        .messages-list { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+        
+        .message { max-width: 70%; padding: 8px 12px; border-radius: 12px; position: relative; font-size: 15px; line-height: 1.4; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+        .message.received { background: var(--bg-msg-in); align-self: flex-start; border-bottom-left-radius: 2px; }
+        .message.sent { background: var(--bg-msg-out); align-self: flex-end; border-bottom-right-radius: 2px; }
+        
+        .msg-time { float: right; font-size: 11px; margin-left: 10px; margin-top: 6px; color: var(--text-meta); }
+        
+        .chat-input-area { padding: 10px 20px; background: var(--bg-primary); display: flex; align-items: flex-end; gap: 10px; }
+        .input-wrapper { flex: 1; background: var(--bg-secondary); border-radius: 20px; padding: 10px 15px; max-height: 100px; overflow-y: auto; }
+        #messageInput { width: 100%; border: none; background: transparent; resize: none; height: 24px; font-size: 16px; color: var(--text-primary); font-family: inherit; }
+        
+        .send-btn { width: 45px; height: 45px; border-radius: 50%; background: none; color: #3390ec; border: none; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .send-btn:hover { background: rgba(51, 144, 236, 0.1); }
+        .send-btn:disabled { color: var(--text-secondary); cursor: default; }
+
+        /* Empty State */
+        .empty-state { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: var(--text-secondary); }
+        .empty-state i { font-size: 64px; margin-bottom: 20px; color: #dfe1e5; }
+        
+        /* Modals */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 100; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
+        .modal-overlay.open { display: flex; opacity: 1; }
+        .modal { background: var(--bg-primary); padding: 25px; border-radius: 12px; width: 90%; max-width: 400px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); transform: scale(0.9); transition: transform 0.2s; }
+        .modal-overlay.open .modal { transform: scale(1); }
+        .modal h2 { margin-bottom: 15px; font-size: 20px; }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #3390ec; }
+        .form-group input { width: 100%; padding: 10px; border: 2px solid var(--border); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); transition: 0.2s; }
+        .form-group input:focus { border-color: #3390ec; }
+        
+        .modal-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .btn { padding: 8px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: 500; font-size: 14px; }
+        .btn-ghost { background: transparent; color: #3390ec; }
+        .btn-ghost:hover { background: rgba(51, 144, 236, 0.1); }
+        .btn-primary { background: #3390ec; color: white; }
+        .btn-primary:hover { background: #2884dd; }
+
+        /* Floating Action Button */
+        .fab { position: absolute; bottom: 20px; right: 20px; width: 56px; height: 56px; background: #3390ec; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); cursor: pointer; transition: 0.2s; z-index: 20; border: none; }
+        .fab:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 3px; }
+        
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .sidebar { width: 100%; position: absolute; height: 100%; }
+            .sidebar.hidden { transform: translateX(-100%); }
+            .chat-area { width: 100%; }
+            .back-btn { display: block; }
         }
-        .message { 
-            margin: 10px 0; 
-            padding: 10px; 
-            border-radius: 8px;
-            max-width: 80%;
-            word-wrap: break-word;
-        }
-        .my { 
-            background: #007AFF; 
-            color: white;
-            margin-left: auto;
-        }
-        .their { 
-            background: #E8E8E8; 
-            color: #333;
-        }
-        .system { 
-            background: #FFF3CD; 
-            color: #856404;
-            font-size: 0.9em;
-            text-align: center;
-            max-width: 100%;
-            border: 1px solid #FFEEBA;
-        }
-        input, button {
-            width: 100%;
-            padding: 12px;
-            margin: 8px 0;
-            border-radius: 8px;
-            font-size: 16px;
-        }
-        input {
-            border: 1px solid #ddd;
-            background: white;
-        }
-        button {
-            background: #007AFF;
-            color: white;
-            border: none;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        button:hover { background: #0056CC; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-        .id-display {
-            background: #f0f0f0;
-            padding: 10px;
-            border-radius: 6px;
-            font-family: monospace;
-            word-break: break-all;
-            margin: 10px 0;
-        }
-        .status {
-            padding: 8px;
-            border-radius: 6px;
-            margin: 10px 0;
-            font-size: 0.9em;
-        }
-        .online { background: #D4EDDA; color: #155724; }
-        .offline { background: #F8D7DA; color: #721C24; }
-        .encrypted-badge {
-            display: inline-block;
-            background: #28a745;
-            color: white;
-            font-size: 0.7em;
-            padding: 2px 6px;
-            border-radius: 10px;
-            margin-left: 5px;
+        @media (min-width: 769px) {
+            .sidebar { transform: none !important; }
         }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h2>🔐 P2P E2E Зашифрованный Чат</h2>
-        
-        <div class="status" id="statusBox">🔄 Подключаемся...</div>
-        
-        <div>
-            <strong>Ваш ID для подключения:</strong>
-            <div class="id-display">
-                <span id="myId">генерируется...</span>
-                <button onclick="copyId()" style="width: auto; padding: 5px 10px; float: right;">📋 Копировать</button>
+
+<div class="app-container">
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <button class="my-id-btn" onclick="showMyIdModal()" title="Мой Профиль">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="search-bar">
+                <i class="fas fa-search"></i>
+                <input type="text" placeholder="Поиск" id="searchInput" onkeyup="filterContacts()">
             </div>
         </div>
-        
-        <div>
-            <label for="peerId"><strong>ID собеседника:</strong></label>
-            <input type="text" id="peerId" placeholder="Вставьте сюда ID собеседника">
-            <button onclick="connect()" id="connectBtn">🔗 Подключиться</button>
-        </div>
-    </div>
-    
-    <div class="card">
-        <div id="chat">
-            <div class="message system">
-                🌟 Добро пожаловать в P2P E2E чат!<br>
-                🔒 Все сообщения шифруются на вашем устройстве
+        <div class="contact-list" id="contactList">
             </div>
-        </div>
-        
-        <div>
-            <input type="text" id="message" placeholder="Напишите сообщение..." onkeypress="if(event.key=='Enter') send()">
-            <button onclick="send()" id="sendBtn" disabled>🔒 Отправить зашифрованное сообщение</button>
-        </div>
-    </div>
-    
-    <div class="card" style="font-size: 0.9em; color: #666;">
-        <strong>📌 Как использовать:</strong>
-        <ol>
-            <li>Дайте свой ID (выше) собеседнику</li>
-            <li>Получите его ID и вставьте в поле выше</li>
-            <li>Нажмите "Подключиться" — ключи обменяются автоматически</li>
-            <li>Пишите сообщения — они шифруются перед отправкой</li>
-        </ol>
-        <div style="margin-top: 10px; padding: 10px; background: #E3F2FD; border-radius: 6px;">
-            🔐 <strong>Безопасность:</strong> Сообщения шифруются с помощью RSA-2048 и Web Crypto API.
-            Даже GitHub не может их прочитать.
-        </div>
+        <button class="fab" onclick="showAddContactModal()">
+            <i class="fas fa-pen"></i>
+        </button>
     </div>
 
-    <script>
-        // ==================== КОНФИГУРАЦИЯ ====================
-        const CONFIG = {
-            peerjs: {
-                host: '0.peerjs.com',
-                port: 443,
-                secure: true,
-                debug: 0
-            },
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' }
-            ]
+    <div class="chat-area" id="chatArea">
+        <div class="empty-state" id="emptyState">
+            <i class="far fa-comments"></i>
+            <h3>Выберите чат, чтобы начать общение</h3>
+        </div>
+
+        <div id="activeChatContainer" style="display: none; height: 100%; flex-direction: column;">
+            <div class="chat-header">
+                <button class="back-btn" onclick="toggleView('sidebar')">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <div class="avatar" style="width: 40px; height: 40px; font-size: 16px;" id="headerAvatar">?</div>
+                <div class="chat-title">
+                    <h3 id="headerName">Имя</h3>
+                    <div class="chat-status">
+                        <span class="status-dot" id="statusDot"></span>
+                        <span id="statusText">Оффлайн</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="messages-list" id="messagesList">
+                </div>
+
+            <div class="chat-input-area">
+                <div class="input-wrapper">
+                    <textarea id="messageInput" placeholder="Написать сообщение..." rows="1" oninput="autoResize(this)" onkeypress="handleEnter(event)"></textarea>
+                </div>
+                <button class="send-btn" onclick="sendMessage()" id="sendBtn">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="myIdModal" onclick="if(event.target===this) closeModal('myIdModal')">
+    <div class="modal">
+        <h2>👤 Мой профиль</h2>
+        <div class="form-group">
+            <label>Ваш Peer ID (отправьте другу)</label>
+            <input type="text" id="myIdDisplay" readonly onclick="this.select()">
+        </div>
+        <div class="status" id="connectionStatus" style="font-size: 14px; margin-bottom: 10px;">
+            <i class="fas fa-circle-notch fa-spin"></i> Подключение к сети...
+        </div>
+        <div class="modal-buttons">
+            <button class="btn btn-primary" onclick="copyId()">Копировать ID</button>
+            <button class="btn btn-ghost" onclick="closeModal('myIdModal')">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="addContactModal" onclick="if(event.target===this) closeModal('addContactModal')">
+    <div class="modal">
+        <h2>➕ Новый контакт</h2>
+        <div class="form-group">
+            <label>Имя контакта</label>
+            <input type="text" id="newContactName" placeholder="Например: Иван">
+        </div>
+        <div class="form-group">
+            <label>Peer ID собеседника</label>
+            <input type="text" id="newContactId" placeholder="Вставьте ID сюда">
+        </div>
+        <div class="modal-buttons">
+            <button class="btn btn-ghost" onclick="closeModal('addContactModal')">Отмена</button>
+            <button class="btn btn-primary" onclick="addContact()">Создать</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- STATE ---
+    let peer = null;
+    let myId = null;
+    let connections = {}; // Map: peerId -> DataConnection
+    let contacts = JSON.parse(localStorage.getItem('tg_contacts') || '[]');
+    let messages = JSON.parse(localStorage.getItem('tg_messages') || '{}');
+    let activeChatId = null;
+
+    // --- INIT ---
+    async function init() {
+        renderContacts();
+        
+        // PeerJS Config (using public cloud for demo)
+        peer = new Peer(null, {
+            debug: 2,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:global.stun.twilio.com:3478' }
+                ]
+            }
+        });
+
+        peer.on('open', (id) => {
+            myId = id;
+            document.getElementById('myIdDisplay').value = id;
+            document.getElementById('connectionStatus').innerHTML = '<span style="color:#00c853">● Подключено к сети</span>';
+            console.log('My ID:', id);
+        });
+
+        peer.on('connection', (conn) => {
+            setupConnection(conn);
+        });
+
+        peer.on('disconnected', () => {
+             document.getElementById('connectionStatus').innerHTML = '<span style="color:orange">⚠ Соединение потеряно</span>';
+             peer.reconnect();
+        });
+        
+        peer.on('error', (err) => {
+            console.error(err);
+            if(err.type === 'peer-unavailable' && activeChatId) {
+                updateChatStatus('offline');
+            }
+        });
+    }
+
+    // --- CORE LOGIC ---
+
+    function setupConnection(conn) {
+        conn.on('open', () => {
+            connections[conn.peer] = conn;
+            if (activeChatId === conn.peer) {
+                updateChatStatus('online');
+            }
+            // Check if contact exists, if not, create temporary one (optional, here we skip unknown)
+        });
+
+        conn.on('data', (data) => {
+            handleIncomingMessage(conn.peer, data);
+        });
+
+        conn.on('close', () => {
+            delete connections[conn.peer];
+            if (activeChatId === conn.peer) {
+                updateChatStatus('offline');
+            }
+        });
+    }
+
+    function addContact() {
+        const name = document.getElementById('newContactName').value.trim();
+        const id = document.getElementById('newContactId').value.trim();
+
+        if (!name || !id) return alert('Заполните все поля');
+        if (id === myId) return alert('Нельзя добавить самого себя');
+
+        // Check duplicates
+        if (contacts.find(c => c.id === id)) {
+            alert('Этот контакт уже существует');
+            return;
+        }
+
+        const newContact = {
+            id: id,
+            name: name,
+            color: getRandomColor(),
+            lastMessage: '',
+            timestamp: Date.now()
         };
 
-        // ==================== КРИПТОГРАФИЯ ====================
-        class E2EEncryptor {
-            constructor() {
-                this.keyPair = null;
-                this.peerPublicKey = null;
-                this.peerKeyFingerprint = null;
-            }
-            
-            async generateKeyPair() {
-                try {
-                    this.keyPair = await window.crypto.subtle.generateKey(
-                        {
-                            name: "RSA-OAEP",
-                            modulusLength: 2048,
-                            publicExponent: new Uint8Array([1, 0, 1]),
-                            hash: "SHA-256"
-                        },
-                        true,
-                        ["encrypt", "decrypt"]
-                    );
-                    
-                    const exported = await window.crypto.subtle.exportKey("spki", this.keyPair.publicKey);
-                    const fingerprint = await this.calculateFingerprint(exported);
-                    
-                    return {
-                        key: this.arrayBufferToBase64(exported),
-                        fingerprint: fingerprint
-                    };
-                } catch (e) {
-                    console.error("Ошибка генерации ключей:", e);
-                    throw e;
-                }
-            }
-            
-            async importPeerPublicKey(base64Key) {
-                try {
-                    const keyData = this.base64ToArrayBuffer(base64Key);
-                    this.peerPublicKey = await window.crypto.subtle.importKey(
-                        "spki",
-                        keyData,
-                        { name: "RSA-OAEP", hash: "SHA-256" },
-                        true,
-                        ["encrypt"]
-                    );
-                    
-                    // Вычисляем fingerprint для проверки
-                    this.peerKeyFingerprint = await this.calculateFingerprint(keyData);
-                    return this.peerKeyFingerprint;
-                } catch (e) {
-                    console.error("Ошибка импорта ключа:", e);
-                    throw e;
-                }
-            }
-            
-            async calculateFingerprint(keyData) {
-                const hash = await window.crypto.subtle.digest("SHA-256", keyData);
-                const hex = Array.from(new Uint8Array(hash))
-                    .map(b => b.toString(16).padStart(2, '0'))
-                    .join('')
-                    .substring(0, 16); // первые 16 символов для читаемости
-                return hex.match(/.{4}/g).join(':');
-            }
-            
-            async encryptMessage(message) {
-                if (!this.peerPublicKey) throw new Error("Нет ключа собеседника");
-                
-                const encoder = new TextEncoder();
-                const data = encoder.encode(message);
-                
-                const encrypted = await window.crypto.subtle.encrypt(
-                    { name: "RSA-OAEP" },
-                    this.peerPublicKey,
-                    data
-                );
-                
-                return this.arrayBufferToBase64(encrypted);
-            }
-            
-            async decryptMessage(base64Encrypted) {
-                if (!this.keyPair) throw new Error("Нет приватного ключа");
-                
-                const encryptedData = this.base64ToArrayBuffer(base64Encrypted);
-                const decrypted = await window.crypto.subtle.decrypt(
-                    { name: "RSA-OAEP" },
-                    this.keyPair.privateKey,
-                    encryptedData
-                );
-                
-                return new TextDecoder().decode(decrypted);
-            }
-            
-            arrayBufferToBase64(buffer) {
-                const bytes = new Uint8Array(buffer);
-                let binary = '';
-                for (let i = 0; i < bytes.byteLength; i++) {
-                    binary += String.fromCharCode(bytes[i]);
-                }
-                return btoa(binary);
-            }
-            
-            base64ToArrayBuffer(base64) {
-                const binaryString = atob(base64);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                return bytes.buffer;
-            }
+        contacts.unshift(newContact);
+        saveContacts();
+        renderContacts();
+        closeModal('addContactModal');
+        
+        // Clear inputs
+        document.getElementById('newContactName').value = '';
+        document.getElementById('newContactId').value = '';
+
+        // Select immediately
+        selectChat(id);
+    }
+
+    function handleIncomingMessage(senderId, data) {
+        // Ensure contact exists (or handle unknown)
+        let contact = contacts.find(c => c.id === senderId);
+        if (!contact) {
+            // Auto-create contact for unknown senders
+            contact = {
+                id: senderId,
+                name: "Неизвестный " + senderId.substr(0,4),
+                color: '#666',
+                lastMessage: '',
+                timestamp: Date.now()
+            };
+            contacts.push(contact);
         }
 
-        // ==================== ОСНОВНОЙ КОД ====================
-        let peer = null;
-        let conn = null;
-        let encryptor = new E2EEncryptor();
-        let myKeyInfo = null;
+        // Save message
+        const msgObj = {
+            text: data.text,
+            time: Date.now(),
+            isMine: false
+        };
 
-        async function init() {
-            updateStatus("🔑 Генерируем ваши ключи шифрования...", "offline");
-            
-            try {
-                // 1. Генерируем ключи
-                myKeyInfo = await encryptor.generateKeyPair();
-                
-                // 2. Создаём Peer соединение
-                peer = new Peer({
-                    host: CONFIG.peerjs.host,
-                    port: CONFIG.peerjs.port,
-                    secure: CONFIG.peerjs.secure,
-                    debug: CONFIG.peerjs.debug,
-                    config: { iceServers: CONFIG.iceServers }
-                });
-                
-                peer.on('open', (id) => {
-                    document.getElementById('myId').textContent = id;
-                    updateStatus(`✅ Готов к подключению. Ваш fingerprint: ${myKeyInfo.fingerprint}`, "online");
-                    document.getElementById('connectBtn').disabled = false;
-                    addSystemMessage("Ваши ключи сгенерированы. Дайте ваш ID собеседнику.");
-                });
-                
-                peer.on('error', (err) => {
-                    console.error("PeerJS error:", err);
-                    updateStatus(`❌ Ошибка: ${err.type}`, "offline");
-                });
-                
-                // Обработка входящих подключений
-                peer.on('connection', (connection) => {
-                    conn = connection;
-                    setupConnection(conn, true);
-                });
-                
-            } catch (error) {
-                updateStatus(`❌ Ошибка инициализации: ${error.message}`, "offline");
-                console.error("Init error:", error);
-            }
+        if (!messages[senderId]) messages[senderId] = [];
+        messages[senderId].push(msgObj);
+        saveMessages();
+
+        // Update contact list preview
+        contact.lastMessage = data.text;
+        contact.timestamp = Date.now();
+        // Move to top
+        contacts = contacts.filter(c => c !== contact);
+        contacts.unshift(contact);
+        saveContacts();
+        renderContacts();
+
+        // If chat open, append
+        if (activeChatId === senderId) {
+            renderMessage(msgObj);
+            scrollToBottom();
+        } else {
+            // Play notification sound or show badge (simple implementation here)
+            const el = document.querySelector(`.contact-item[data-id="${senderId}"]`);
+            if(el) el.style.background = 'var(--bg-hover)';
+        }
+    }
+
+    function sendMessage() {
+        const input = document.getElementById('messageInput');
+        const text = input.value.trim();
+        
+        if (!text || !activeChatId) return;
+
+        // 1. Send via PeerJS
+        let conn = connections[activeChatId];
+        if (!conn || !conn.open) {
+            // Try to reconnect
+            conn = peer.connect(activeChatId);
+            setupConnection(conn);
         }
         
-        function setupConnection(connection, isIncoming = false) {
-            updateStatus("🔄 Устанавливаем безопасное соединение...", "offline");
-            
-            connection.on('open', async () => {
-                if (isIncoming) {
-                    // При входящем соединении отправляем свой ключ
-                    connection.send({
-                        type: 'public_key',
-                        key: myKeyInfo.key,
-                        fingerprint: myKeyInfo.fingerprint
-                    });
-                    addSystemMessage("Собеседник подключился. Отправляем ключи...");
-                }
-            });
-            
-            connection.on('data', async (data) => {
-                try {
-                    switch (data.type) {
-                        case 'public_key':
-                            const fingerprint = await encryptor.importPeerPublicKey(data.key);
-                            addSystemMessage(`✅ Получен ключ собеседника. Fingerprint: ${fingerprint}`);
-                            
-                            // Отправляем подтверждение
-                            connection.send({
-                                type: 'key_ack',
-                                fingerprint: myKeyInfo.fingerprint
-                            });
-                            
-                            updateStatus(`🔐 Зашифрованное соединение установлено!`, "online");
-                            document.getElementById('sendBtn').disabled = false;
-                            addSystemMessage("✅ Ключи проверены. Можно общаться безопасно!");
-                            break;
-                            
-                        case 'key_ack':
-                            addSystemMessage(`✅ Собеседник подтвердил ваш ключ. Его fingerprint: ${data.fingerprint}`);
-                            updateStatus(`🔐 Зашифрованное соединение установлено!`, "online");
-                            document.getElementById('sendBtn').disabled = false;
-                            break;
-                            
-                        case 'encrypted_message':
-                            const decrypted = await encryptor.decryptMessage(data.message);
-                            addMessage(decrypted, 'their', true);
-                            break;
-                            
-                        case 'ping':
-                            connection.send({ type: 'pong' });
-                            break;
-                    }
-                } catch (error) {
-                    console.error("Ошибка обработки данных:", error);
-                    addSystemMessage(`❌ Ошибка: ${error.message}`);
-                }
-            });
-            
-            connection.on('close', () => {
-                updateStatus("❌ Соединение разорвано", "offline");
-                document.getElementById('sendBtn').disabled = true;
-                conn = null;
-                addSystemMessage("Соединение закрыто.");
-            });
-            
-            connection.on('error', (err) => {
-                console.error("Connection error:", err);
-                addSystemMessage(`Ошибка соединения: ${err.message}`);
-            });
+        // Note: sending might fail if connection not yet open, in real app queue it
+        conn.on('open', () => {
+             conn.send({ text: text });
+        });
+        if(conn.open) conn.send({ text: text });
+
+
+        // 2. Save locally
+        const msgObj = {
+            text: text,
+            time: Date.now(),
+            isMine: true
+        };
+
+        if (!messages[activeChatId]) messages[activeChatId] = [];
+        messages[activeChatId].push(msgObj);
+        saveMessages();
+
+        // 3. Update UI
+        renderMessage(msgObj);
+        scrollToBottom();
+        input.value = '';
+        input.style.height = '24px';
+        input.focus();
+
+        // 4. Update Sidebar
+        const contact = contacts.find(c => c.id === activeChatId);
+        if(contact) {
+            contact.lastMessage = text;
+            contact.timestamp = Date.now();
+            contacts = contacts.filter(c => c !== contact);
+            contacts.unshift(contact);
+            saveContacts();
+            renderContacts();
         }
-        
-        async function connect() {
-            const peerId = document.getElementById('peerId').value.trim();
-            if (!peerId) {
-                alert("Введите ID собеседника");
-                return;
-            }
-            
-            if (conn) {
-                if (confirm("Уже есть активное соединение. Переподключиться?")) {
-                    conn.close();
-                } else {
-                    return;
-                }
-            }
-            
-            updateStatus("🔄 Подключаемся к собеседнику...", "offline");
-            
-            try {
-                conn = peer.connect(peerId, { reliable: true });
-                setupConnection(conn, false);
+    }
+
+    // --- UI RENDERING ---
+
+    function renderContacts() {
+        const list = document.getElementById('contactList');
+        const filter = document.getElementById('searchInput').value.toLowerCase();
+        list.innerHTML = '';
+
+        contacts.forEach(contact => {
+            if (contact.name.toLowerCase().includes(filter)) {
+                const div = document.createElement('div');
+                div.className = `contact-item ${activeChatId === contact.id ? 'active' : ''}`;
+                div.dataset.id = contact.id;
+                div.onclick = () => selectChat(contact.id);
                 
-                conn.on('open', async () => {
-                    addSystemMessage("Подключение установлено. Отправляем ключи...");
-                    
-                    // Отправляем свой публичный ключ
-                    conn.send({
-                        type: 'public_key',
-                        key: myKeyInfo.key,
-                        fingerprint: myKeyInfo.fingerprint
-                    });
-                });
+                const timeStr = contact.timestamp ? formatTime(contact.timestamp) : '';
                 
-            } catch (error) {
-                updateStatus(`❌ Ошибка подключения: ${error.message}`, "offline");
-                console.error("Connect error:", error);
+                div.innerHTML = `
+                    <div class="avatar" style="background: ${contact.color}">${contact.name[0].toUpperCase()}</div>
+                    <div class="contact-info">
+                        <div class="contact-top">
+                            <span class="contact-name">${escapeHtml(contact.name)}</span>
+                            <span class="contact-time">${timeStr}</span>
+                        </div>
+                        <div class="contact-last-msg">${escapeHtml(contact.lastMessage || 'Нет сообщений')}</div>
+                    </div>
+                `;
+                list.appendChild(div);
             }
+        });
+    }
+
+    function selectChat(id) {
+        activeChatId = id;
+        
+        // Logic for mobile view
+        if (window.innerWidth <= 768) {
+            document.getElementById('sidebar').classList.add('hidden');
         }
         
-        async function send() {
-            const input = document.getElementById('message');
-            const message = input.value.trim();
-            
-            if (!message) return;
-            if (!conn || !conn.open) {
-                alert("Сначала подключитесь к собеседнику");
-                return;
-            }
-            if (!encryptor.peerPublicKey) {
-                alert("Ключи ещё не обменены");
-                return;
-            }
-            
-            try {
-                const encrypted = await encryptor.encryptMessage(message);
-                conn.send({
-                    type: 'encrypted_message',
-                    message: encrypted,
-                    timestamp: Date.now()
-                });
-                
-                addMessage(message, 'my', true);
-                input.value = '';
-                input.focus();
-                
-            } catch (error) {
-                console.error("Ошибка отправки:", error);
-                addSystemMessage(`❌ Не удалось отправить: ${error.message}`);
-            }
-        }
+        // Update UI logic
+        document.getElementById('emptyState').style.display = 'none';
+        document.getElementById('activeChatContainer').style.display = 'flex';
         
-        function addMessage(text, type, encrypted = false) {
-            const chat = document.getElementById('chat');
-            const div = document.createElement('div');
-            div.className = `message ${type}`;
-            
-            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const encryptedBadge = encrypted ? '<span class="encrypted-badge">🔒</span>' : '';
-            
-            if (type === 'my') {
-                div.innerHTML = `<div><strong>Вы (${time}):</strong> ${text} ${encryptedBadge}</div>`;
-            } else {
-                div.innerHTML = `<div><strong>Собеседник (${time}):</strong> ${text} ${encryptedBadge}</div>`;
-            }
-            
-            chat.appendChild(div);
-            chat.scrollTop = chat.scrollHeight;
+        // Highlight in sidebar
+        renderContacts(); 
+
+        const contact = contacts.find(c => c.id === id);
+        if (contact) {
+            document.getElementById('headerName').textContent = contact.name;
+            document.getElementById('headerAvatar').textContent = contact.name[0].toUpperCase();
+            document.getElementById('headerAvatar').style.background = contact.color;
         }
-        
-        function addSystemMessage(text) {
-            const chat = document.getElementById('chat');
-            const div = document.createElement('div');
-            div.className = 'message system';
-            div.innerHTML = `<div>${text}</div>`;
-            chat.appendChild(div);
-            chat.scrollTop = chat.scrollHeight;
+
+        // Try connect
+        if (!connections[id] || !connections[id].open) {
+            updateChatStatus('offline');
+            const conn = peer.connect(id);
+            setupConnection(conn);
+        } else {
+            updateChatStatus('online');
         }
+
+        // Render History
+        const list = document.getElementById('messagesList');
+        list.innerHTML = '';
+        const chatMsgs = messages[id] || [];
+        chatMsgs.forEach(renderMessage);
+        scrollToBottom();
         
-        function updateStatus(text, type = '') {
-            const statusBox = document.getElementById('statusBox');
-            statusBox.textContent = text;
-            statusBox.className = 'status';
-            if (type) statusBox.classList.add(type);
+        document.getElementById('messageInput').focus();
+    }
+
+    function renderMessage(msg) {
+        const list = document.getElementById('messagesList');
+        const div = document.createElement('div');
+        div.className = `message ${msg.isMine ? 'sent' : 'received'}`;
+        
+        // Secure text rendering
+        const textSpan = document.createElement('span');
+        textSpan.textContent = msg.text;
+        
+        div.appendChild(textSpan);
+        div.innerHTML += `<span class="msg-time">${formatTime(msg.time)}</span>`;
+        
+        list.appendChild(div);
+    }
+
+    // --- HELPERS ---
+
+    function toggleView(view) {
+        const sidebar = document.getElementById('sidebar');
+        if (view === 'sidebar') {
+            sidebar.classList.remove('hidden');
+            activeChatId = null;
+            renderContacts(); // remove active highlight
         }
-        
-        function copyId() {
-            const id = document.getElementById('myId').textContent;
-            if (id && id !== 'генерируется...') {
-                navigator.clipboard.writeText(id).then(() => {
-                    alert("ID скопирован! Дайте его собеседнику.");
-                });
-            }
+    }
+
+    function updateChatStatus(status) {
+        const dot = document.getElementById('statusDot');
+        const text = document.getElementById('statusText');
+        if (status === 'online') {
+            dot.className = 'status-dot online';
+            text.textContent = 'В сети';
+        } else {
+            dot.className = 'status-dot';
+            text.textContent = 'Ожидание сети...';
         }
-        
-        // Инициализация при загрузке
-        window.addEventListener('DOMContentLoaded', init);
-    </script>
+    }
+
+    function saveContacts() { localStorage.setItem('tg_contacts', JSON.stringify(contacts)); }
+    function saveMessages() { localStorage.setItem('tg_messages', JSON.stringify(messages)); }
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    function formatTime(ts) {
+        const d = new Date(ts);
+        return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+    }
+
+    function getRandomColor() {
+        const colors = ['linear-gradient(135deg, #ff9a9e, #fecfef)', 'linear-gradient(135deg, #a18cd1, #fbc2eb)', 'linear-gradient(135deg, #84fab0, #8fd3f4)', 'linear-gradient(135deg, #fccb90, #d57eeb)'];
+        return colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    function autoResize(textarea) {
+        textarea.style.height = 'auto';
+        textarea.style.height = (textarea.scrollHeight) + 'px';
+        if(textarea.value === '') textarea.style.height = '24px';
+    }
+
+    function handleEnter(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    }
+
+    function scrollToBottom() {
+        const list = document.getElementById('messagesList');
+        list.scrollTop = list.scrollHeight;
+    }
+
+    function showMyIdModal() {
+        document.getElementById('myIdModal').classList.add('open');
+    }
+
+    function showAddContactModal() {
+        document.getElementById('addContactModal').classList.add('open');
+        document.getElementById('newContactName').focus();
+    }
+
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('open');
+    }
+
+    function copyId() {
+        const copyText = document.getElementById("myIdDisplay");
+        copyText.select();
+        document.execCommand("copy");
+        alert("ID скопирован в буфер обмена!");
+    }
+    
+    function filterContacts() {
+        renderContacts();
+    }
+
+    // Start
+    window.addEventListener('load', init);
+</script>
 </body>
 </html>
