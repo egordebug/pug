@@ -79,55 +79,77 @@ function listenToGroups(myUid) {
 }
 
 function openCreateGroupModal() {
-    // Генерируем список друзей для выбора
     const list = document.getElementById('groupUserList');
+    const contactSection = document.getElementById('groupContactSection');
+    const manualLabel = document.getElementById('manualLabel');
+    
     list.innerHTML = '';
     
-    if(state.contacts.length === 0) {
-        list.innerHTML = '<div style="padding:10px; text-align:center; opacity:0.5;">Нет контактов</div>';
-        return;
+    if (!state.contacts || state.contacts.length === 0) {
+        // Если контактов нет — скрываем блок со списком
+        contactSection.style.display = 'none';
+        manualLabel.innerText = "У вас нет контактов. Введите ID участников через запятую:";
+    } else {
+        // Если контакты есть — показываем всё красиво
+        contactSection.style.display = 'block';
+        manualLabel.innerText = "Или добавьте других по ID (через запятую):";
+        
+        state.contacts.forEach(c => {
+            const div = document.createElement('div');
+            div.className = 'user-select-item';
+            div.style = 'display:flex; align-items:center; padding:8px; gap:10px; border-bottom:1px solid var(--sec);';
+            div.innerHTML = `
+                <input type="checkbox" value="${c.id}" id="chk_${c.id}" style="width:18px; height:18px;">
+                <img src="${c.avatar}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;">
+                <label for="chk_${c.id}" style="flex:1; cursor:pointer; font-size:14px;">${c.name}</label>
+            `;
+            list.appendChild(div);
+        });
     }
-
-    state.contacts.forEach(c => {
-        const div = document.createElement('div');
-        div.className = 'user-select-item';
-        div.innerHTML = `
-            <input type="checkbox" value="${c.id}" id="chk_${c.id}">
-            <img src="${c.avatar}" style="width:30px; height:30px; border-radius:50%">
-            <label for="chk_${c.id}" style="flex:1; cursor:pointer">${c.name}</label>
-        `;
-        list.appendChild(div);
-    });
     
     openModal('modalCreateGroup');
 }
 
+
 async function finishCreateGroup() {
     const name = document.getElementById('newGroupName').value.trim();
-    if(!name) return showToast('Введите название');
+    if(!name) return showToast('Назовите группу!');
     
-    // Собираем выбранных участников
     const checkboxes = document.querySelectorAll('#groupUserList input[type="checkbox"]:checked');
-    const memberIds = Array.from(checkboxes).map(cb => cb.value);
+    const checkedIds = Array.from(checkboxes).map(cb => cb.value);
     
-    // Добавляем себя
-    const finalMembers = [...new Set([state.profile.id, ...memberIds])];
-    
+    const manualInput = document.getElementById('manualIds').value.trim();
+    let finalUids = [...checkedIds];
+
     try {
+        if (manualInput) {
+            const manualIds = manualInput.split(',').map(id => id.trim().toLowerCase()).filter(id => id);
+            // Ищем UID по коротким ID в базе
+            const usersSnap = await db.collection("users").where("shortId", "in", manualIds).get();
+            usersSnap.forEach(doc => finalUids.push(doc.data().id));
+        }
+
+        const members = [...new Set([state.profile.id, ...finalUids])];
+        if (members.length < 2) return showToast("Нужен хотя бы один участник кроме вас");
+
         await db.collection("groups").add({
             name: name,
-            members: finalMembers,
+            members: members,
             admin: state.profile.id,
-            avatar: `https://ui-avatars.com/api/?name=${name}&background=random`,
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&color=fff`,
             createdAt: Date.now()
         });
+
         showToast('Группа создана!');
         closeModals();
+        // Очистка полей
+        document.getElementById('newGroupName').value = '';
+        document.getElementById('manualIds').value = '';
     } catch(e) {
-        console.error(e);
-        showToast('Ошибка создания группы');
+        showToast('Ошибка. Проверьте правильность ID');
     }
 }
+
 
 // === АВТОРИЗАЦИЯ ===
 async function handleAuth() {
