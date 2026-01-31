@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Maranuchok Auth</title>
+    <title>Maranuchok Messenger</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
     <style>
         :root {
             --bg: #ffffff; --sec: #f4f4f5; --text: #1c1c1e; --hint: #8e8e93;
@@ -34,27 +35,11 @@
         .avatar:active { transform: scale(0.95); }
         .avatar.large { width: 100px; height: 100px; border: 4px solid var(--blue); margin: 0 auto; display: block; }
         
-        /* Исправленное аудио */
-        audio {
-            height: 40px;
-            max-width: 240px;
-            border-radius: 20px;
-            margin: 4px 0;
-        }
-        /* Стилизация плеера для Webkit (Chrome/Safari) чтобы вписывался в баббл */
-        .msg.out audio { filter: brightness(0) invert(1) opacity(0.8); } /* Белый на синем */
+        audio { height: 40px; max-width: 240px; border-radius: 20px; margin: 4px 0; }
+        .msg.out audio { filter: brightness(0) invert(1) opacity(0.8); }
         .msg.in audio { filter: opacity(0.7); }
 
-        /* Видео кружочки */
-        video.circle-msg {
-            width: 220px;
-            height: 220px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 3px solid white;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            background: #000;
-        }
+        video.circle-msg { width: 220px; height: 220px; border-radius: 50%; object-fit: cover; border: 3px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); background: #000; }
 
         .contact-list { flex: 1; overflow-y: auto; scrollbar-width: thin; }
         .contact { padding: 12px 15px; display: flex; gap: 12px; align-items: center; cursor: pointer; transition: background 0.2s; position: relative; }
@@ -72,16 +57,11 @@
         .msg { max-width: 75%; padding: 10px 14px; border-radius: var(--radius); font-size: 15px; position: relative; word-wrap: break-word; animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         .msg.in { background: var(--msg-in); align-self: flex-start; border-bottom-left-radius: 4px; }
         .msg.out { background: var(--msg-out); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
-        
-        /* Убираем фон у сообщений с кружочками, чтобы было красиво */
         .msg.has-circle { background: transparent !important; padding: 0; box-shadow: none; }
         
         .msg img, .msg video:not(.circle-msg) { max-width: 100%; border-radius: 12px; margin-top: 5px; display: block; cursor: pointer; }
         .msg-meta { font-size: 10px; opacity: 0.6; text-align: right; margin-top: 4px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
         .msg.has-circle .msg-meta { color: rgba(255,255,255,0.7); text-shadow: 0 1px 2px rgba(0,0,0,0.5); position: absolute; bottom: 15px; right: 25px; }
-
-        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--hint); gap: 10px; opacity: 0.7; }
-        .empty-state i { font-size: 40px; }
 
         .input-bar { background: var(--bg); padding: 10px; display: flex; gap: 10px; align-items: flex-end; border-top: 1px solid var(--border); }
         .input-field { flex: 1; background: var(--sec); border-radius: 20px; padding: 10px 15px; border: none; outline: none; color: var(--text); resize: none; max-height: 120px; font-size: 16px; transition: height 0.1s; }
@@ -91,12 +71,18 @@
         .btn-icon.red { color: var(--red); }
         .btn-icon.rec { color: var(--red); animation: pulse 1s infinite; background: rgba(255,59,48,0.1); border-radius: 50%; }
 
-        .fab { position: absolute; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%; background: var(--blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); border: none; cursor: pointer; transition: transform 0.2s; }
+        .fab { position: absolute; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%; background: var(--blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); border: none; cursor: pointer; transition: transform 0.2s; z-index: 10; }
         .fab:active { transform: scale(0.9) rotate(90deg); }
+
+        /* --- Меню добавления (Pop-up над FAB) --- */
+        .fab-menu { position: absolute; bottom: 85px; right: 20px; display: none; flex-direction: column; gap: 10px; z-index: 10; }
+        .fab-menu.open { display: flex; animation: popIn 0.2s; }
+        .fab-item { background: var(--bg); color: var(--text); padding: 10px 15px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; cursor: pointer; border: 1px solid var(--border); font-weight: 500; }
+        .fab-item i { width: 20px; text-align: center; color: var(--blue); }
 
         .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; display: none; align-items: center; justify-content: center; backdrop-filter: blur(8px); opacity: 0; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; }
-        .modal { background: var(--bg); width: 90%; max-width: 380px; padding: 24px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); display: flex; flex-direction: column; gap: 12px; }
+        .modal { background: var(--bg); width: 90%; max-width: 380px; padding: 24px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); display: flex; flex-direction: column; gap: 12px; max-height: 80vh; }
         .modal-overlay.open .modal { transform: scale(1); }
 
         .modal h3 { text-align: center; margin-bottom: 5px; }
@@ -107,7 +93,11 @@
         .modal-btn.primary { background: var(--blue); color: #fff; }
         .modal-btn.sec { background: var(--sec); color: var(--text); }
         .modal-btn.danger { background: rgba(255, 59, 48, 0.1); color: var(--red); }
-        .modal-btn:active { opacity: 0.7; }
+
+        .user-select-list { overflow-y: auto; max-height: 200px; border: 1px solid var(--border); border-radius: 10px; padding: 5px; }
+        .user-select-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-bottom: 1px solid var(--sec); cursor: pointer; }
+        .user-select-item:last-child { border-bottom: none; }
+        .user-select-item input { width: 20px; height: 20px; margin: 0; cursor: pointer; }
 
         .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 200; display: none; align-items: center; justify-content: center; cursor: zoom-out; opacity: 0; transition: opacity 0.3s; }
         .lightbox.open { opacity: 1; }
@@ -142,8 +132,19 @@
             <div id="myIdDisplay" style="font-size:12px; opacity:0.6; cursor:pointer;" onclick="copyMyId()">Нажми, чтобы скопировать ID</div>
         </div>
     </div>
+    
     <div class="contact-list" id="contactList"></div>
-    <button class="fab" onclick="openModal('modalAdd')"><i class="fas fa-plus"></i></button>
+
+    <button class="fab" onclick="toggleFabMenu()"><i class="fas fa-plus"></i></button>
+    
+    <div class="fab-menu" id="fabMenu">
+        <div class="fab-item" onclick="openModal('modalAdd'); toggleFabMenu()">
+            <i class="fas fa-user-plus"></i> Найти друга
+        </div>
+        <div class="fab-item" onclick="openCreateGroupModal(); toggleFabMenu()">
+            <i class="fas fa-users"></i> Создать группу
+        </div>
+    </div>
 </div>
 
 <div class="chat-wrap" id="chatWrap">
@@ -157,7 +158,12 @@
         <button class="btn-icon" onclick="openContactOptions(activeChat)"><i class="fas fa-ellipsis-v"></i></button>
     </div>
     
-    <div class="messages" id="messages"></div>
+    <div class="messages" id="messages">
+        <div class="empty-state">
+            <i class="far fa-comments"></i>
+            <div>Выберите чат или группу</div>
+        </div>
+    </div>
 
     <div class="input-bar" id="inputBar">
         <label class="btn-icon"><i class="fas fa-paperclip"></i><input type="file" hidden onchange="sendFile(this)"></label>
@@ -176,21 +182,16 @@
         <div style="text-align:center;">
             <img id="welcomePreview" class="avatar large" src="https://ui-avatars.com/api/?name=M&background=888&color=fff">
         </div>
-        
         <input type="email" id="setupEmail" placeholder="Email (например: user@mail.com)">
         <input type="password" id="setupPassword" placeholder="Пароль (мин. 6 символов)">
-        
         <hr>
         <div style="font-size:12px; text-align:center; opacity:0.6;">Для новых пользователей:</div>
-        
         <input type="text" id="setupShortId" placeholder="Придумайте ID (например: max2024)">
         <input type="text" id="setupName" placeholder="Ваше Имя">
-        
         <div style="display:flex; gap:8px;">
             <input type="text" id="setupAvatar" placeholder="Ссылка на фото" oninput="updatePreview('welcomePreview', this.value)">
             <button class="modal-btn sec" style="width:50px" onclick="setRandomAvatar('setupAvatar', 'welcomePreview')"><i class="fas fa-dice"></i></button>
         </div>
-        
         <button class="modal-btn primary" onclick="handleAuth()">Продолжить</button>
     </div>
 </div>
@@ -200,6 +201,18 @@
         <h3>Новый контакт</h3>
         <input type="text" id="addId" placeholder="Введите ID друга">
         <button class="modal-btn primary" onclick="addContact()">Найти</button>
+        <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modalCreateGroup">
+    <div class="modal">
+        <h3>Создать группу</h3>
+        <input type="text" id="newGroupName" placeholder="Название группы">
+        <div style="font-size:12px; opacity:0.7; margin-top:5px;">Выберите участников:</div>
+        <div class="user-select-list" id="groupUserList">
+            </div>
+        <button class="modal-btn primary" onclick="finishCreateGroup()">Создать</button>
         <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
     </div>
 </div>
@@ -227,501 +240,6 @@
     </div>
 </div>
 
-<script>
-// === КОНФИГУРАЦИЯ FIREBASE ===
-const firebaseConfig = {
-  apiKey: "AIzaSyBglqZ7HP42c3m-cjbZT95fJhttRQRxNqM",
-  authDomain: "maranuchook.firebaseapp.com",
-  projectId: "maranuchook",
-  storageBucket: "maranuchook.firebasestorage.app",
-  messagingSenderId: "607472317729",
-  appId: "1:607472317729:web:6838cbe7645855800aba60"
-};
-
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const auth = firebase.auth();
-
-// === СОСТОЯНИЕ ===
-let state = {
-    profile: { name: '', id: '', shortId: '', avatar: '' },
-    contacts: JSON.parse(localStorage.getItem('nx3_contacts')) || []
-};
-
-let activeChat = null;
-let optionsTargetId = null;
-let mediaRecorder = null;
-let recordedChunks = [];
-let currentUnsubscribe = null;
-
-// === ИНИЦИАЛИЗАЦИЯ ===
-window.onload = () => {
-    auth.onAuthStateChanged(async (user) => {
-        if (user) {
-            try {
-                const doc = await db.collection("users").doc(user.uid).get();
-                if (doc.exists) {
-                    state.profile = doc.data();
-                    updateSelfUI();
-                    renderContactList();
-                    closeModals();
-                    // Обновляем статус активности
-                    db.collection("users").doc(user.uid).update({ lastSeen: Date.now() }).catch(() => {});
-                    checkUrlParams();
-                } else {
-                    // Если Auth есть, а документа нет — показываем форму регистрации
-                    openModal('modalWelcome');
-                }
-            } catch (err) {
-                console.error("Ошибка доступа к профилю:", err);
-                showToast("Ошибка загрузки профиля");
-            }
-        } else {
-            openModal('modalWelcome');
-            setRandomAvatar('setupAvatar', 'welcomePreview');
-        }
-    });
-};
-
-
-// === АВТОРИЗАЦИЯ И РЕГИСТРАЦИЯ ===
-async function handleAuth() {
-    const email = document.getElementById('setupEmail').value.trim();
-    const password = document.getElementById('setupPassword').value.trim();
-    const shortId = document.getElementById('setupShortId').value.trim().toLowerCase();
-    const name = document.getElementById('setupName').value.trim();
-    const avatar = document.getElementById('setupAvatar').value;
-
-    if (!email || !password) return showToast('Введите Email и Пароль');
-
-    try {
-        // Пытаемся войти
-        const userCredential = await auth.signInWithEmailAndPassword(email, password);
-        showToast("Вход выполнен!");
-        // После этого сработает onAuthStateChanged автоматически
-    } catch (loginError) {
-        // Если пользователя нет — регистрируем
-        if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential' || loginError.code === 'auth/invalid-login-credentials') {
-            if (!shortId || !name) return showToast('Для регистрации нужны ID и Имя');
-            if (password.length < 6) return showToast('Пароль минимум 6 символов');
-
-            try {
-                // Проверка уникальности ID
-                const idCheck = await db.collection("users").where("shortId", "==", shortId).get();
-                if (!idCheck.empty) return showToast('Этот ID уже занят');
-
-                const newUser = await auth.createUserWithEmailAndPassword(email, password);
-                
-                const profileData = {
-                    id: newUser.user.uid,
-                    shortId: shortId,
-                    name: name,
-                    avatar: avatar || `https://ui-avatars.com/api/?name=${name}`,
-                    email: email,
-                    createdAt: Date.now()
-                };
-
-                // Записываем в Firestore
-                await db.collection("users").doc(newUser.user.uid).set(profileData);
-                state.profile = profileData;
-                
-                showToast("Аккаунт создан!");
-                closeModals();
-                updateSelfUI();
-            } catch (regError) {
-                console.error(regError);
-                showToast("Ошибка регистрации: " + regError.message);
-            }
-        } else {
-            showToast("Ошибка: " + loginError.message);
-        }
-    }
-}
-
-
-function logout() {
-    if(confirm('Выйти из аккаунта?')) {
-        auth.signOut();
-        localStorage.clear();
-        location.reload();
-    }
-}
-
-// === ЧАТ И СООБЩЕНИЯ ===
-async function checkUrlParams() {
-    const params = new URLSearchParams(window.location.search);
-    const chatShortId = params.get('chat');
-    
-    if (chatShortId) {
-        // Поиск по shortId
-        const query = await db.collection("users").where("shortId", "==", chatShortId).get();
-        if (!query.empty) {
-            const data = query.docs[0].data();
-            if (data.id !== state.profile.id) {
-                 addContactInternal(data);
-                 loadChat(data.id);
-            }
-        }
-        window.history.replaceState({}, document.title, "/");
-    }
-}
-
-function getChatId(user1, user2) {
-    return [user1, user2].sort().join('_');
-}
-
-function loadChat(targetUid) {
-    activeChat = targetUid;
-    const contact = state.contacts.find(c => c.id === targetUid);
-    if (!contact) return;
-
-    // Переключаем интерфейс на мобилках
-    document.getElementById('chatWrap').classList.add('active');
-    document.getElementById('sidebar').classList.add('hidden');
-    
-    // Заполняем шапку чата
-    document.getElementById('chatName').innerText = contact.name;
-    document.getElementById('chatAvatar').src = contact.avatar || `https://ui-avatars.com/api/?name=${contact.name}`;
-    document.getElementById('chatStatus').innerText = "В сети";
-
-    // Отписываемся от предыдущего чата, если он был открыт
-    if (currentUnsubscribe) currentUnsubscribe();
-
-    const combinedId = getChatId(state.profile.id, activeChat);
-    const msgsContainer = document.getElementById('messages');
-    msgsContainer.innerHTML = '';
-
-    // Слушаем базу данных в реальном времени
-    currentUnsubscribe = db.collection("messages")
-        .where("chatId", "==", combinedId)
-        .orderBy("time", "asc")
-        .onSnapshot((snapshot) => {
-            const msgs = [];
-            snapshot.forEach(doc => {
-                // Собираем данные сообщения + добавляем его уникальный ID из Firebase
-                msgs.push({ 
-                    id: doc.id, 
-                    ...doc.data() 
-                }); 
-            });
-            // Рисуем сообщения в чате
-            renderMessages(msgs);
-        }, (error) => {
-            console.error("Ошибка при получении сообщений:", error);
-            showToast("Ошибка доступа к чату");
-        });
-}
-
-function renderMessages(msgs) {
-    const list = document.getElementById('messages');
-    list.innerHTML = '';
-    
-    msgs.forEach(m => {
-        const isMine = m.sender === state.profile.id;
-        let content = '';
-        let extraClass = '';
-        
-        if (m.type === 'text') content = m.content.replace(/\n/g, '<br>');
-        else if (m.type === 'image') content = `<img src="${m.content}" onclick="viewFullScreen(this.src)">`;
-        else if (m.type === 'audio') content = `<audio controls src="${m.content}"></audio>`;
-        else if (m.type === 'video') content = `<video src="${m.content}" controls style="max-width:100%; border-radius:12px;"></video>`;
-        else if (m.type === 'video_note') {
-            extraClass = 'has-circle';
-            content = `<video class="circle-msg" src="${m.content}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
-        }
-
-        const div = document.createElement('div');
-        div.className = `msg ${isMine ? 'out' : 'in'} ${extraClass}`;
-        // Добавляем ID документа из Firebase, чтобы знать, что удалять
-        if (m.id) div.setAttribute('data-msg-id', m.id); 
-
-        // События для долгого нажатия (только для своих сообщений)
-        if (isMine) {
-            div.onmousedown = (e) => startPress(e, m.id, div);
-            div.onmouseup = () => cancelPress(div);
-            div.ontouchstart = (e) => startPress(e, m.id, div);
-            div.ontouchend = () => cancelPress(div);
-        }
-
-        div.innerHTML = `
-            ${content}
-            <div class="msg-meta">
-                ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                ${isMine ? '<i class="fas fa-check" style="margin-left:3px; font-size:9px;"></i>' : ''}
-            </div>
-        `;
-        list.appendChild(div);
-    });
-
-    setTimeout(() => {
-        list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
-    }, 100);
-}
-
-
-async function sendMsg(payload = null) {
-    if(!activeChat) return;
-    const textInput = document.getElementById('msgInput');
-    const text = textInput.value.trim();
-    if(!text && !payload) return;
-
-    const combinedId = getChatId(state.profile.id, activeChat);
-    const msgData = {
-        chatId: combinedId,
-        sender: state.profile.id,
-        senderName: state.profile.name,
-        content: payload ? payload.content : text,
-        type: payload ? payload.type : 'text',
-        time: Date.now()
-    };
-
-    try {
-        await db.collection("messages").add(msgData);
-        textInput.value = '';
-        autoResize(textInput);
-    } catch (e) {
-        showToast("Ошибка отправки");
-    }
-}
-let pressTimer;
-let redTimer;
-
-function startPress(e, msgId, element) {
-    // 1. Через 3 секунды зажатия — сообщение краснеет
-    pressTimer = setTimeout(() => {
-        element.style.transition = 'all 2s ease';
-        element.style.background = 'var(--red)';
-        element.style.color = '#fff';
-        
-        // 2. Еще через 2 секунды (итого 5) — вылетает confirm
-        redTimer = setTimeout(() => {
-            if (confirm('Удалить это сообщение для всех?')) {
-                deleteMessage(msgId);
-            } else {
-                cancelPress(element); // Сброс стиля, если передумал
-            }
-        }, 2000);
-        
-    }, 3000);
-}
-
-function cancelPress(element) {
-    clearTimeout(pressTimer);
-    clearTimeout(redTimer);
-    // Возвращаем стандартный цвет, если отпустили раньше времени
-    element.style.transition = '0.3s';
-    element.style.background = ''; 
-    element.style.color = '';
-}
-
-async function deleteMessage(msgId) {
-    if (!msgId) return;
-    try {
-        await db.collection("messages").doc(msgId).delete();
-        showToast("Сообщение удалено");
-    } catch (e) {
-        showToast("Ошибка при удалении");
-        console.error(e);
-    }
-}
-
-// === КОНТАКТЫ ===
-async function addContact() {
-    const searchShortId = document.getElementById('addId').value.trim().toLowerCase();
-    if(!searchShortId) return;
-    if(searchShortId === state.profile.shortId) return showToast('Это ваш ID');
-    
-    // Ищем по shortId
-    const query = await db.collection("users").where("shortId", "==", searchShortId).get();
-    
-    if(!query.empty) {
-        const userData = query.docs[0].data();
-        addContactInternal(userData);
-        closeModals();
-        loadChat(userData.id);
-    } else {
-        showToast("Пользователь не найден");
-    }
-}
-
-function addContactInternal(userData) {
-    if(!state.contacts.find(c => c.id === userData.id)) {
-        state.contacts.push({ 
-            id: userData.id, 
-            name: userData.name, 
-            avatar: userData.avatar, 
-            shortId: userData.shortId 
-        });
-        saveState();
-        renderContactList();
-    }
-}
-
-function renderContactList() {
-    const list = document.getElementById('contactList');
-    list.innerHTML = '';
-    
-    state.contacts.forEach(c => {
-        const div = document.createElement('div');
-        div.className = `contact ${activeChat === c.id ? 'active' : ''}`;
-        const avatarSrc = c.avatar || `https://ui-avatars.com/api/?name=${c.name}`;
-        
-        div.innerHTML = `
-            <img src="${avatarSrc}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${avatarSrc}')">
-            <div class="contact-info" onclick="loadChat('${c.id}')">
-                <div class="contact-name">
-                    ${c.name}
-                    <span style="font-size:10px; opacity:0.5; font-weight:400">@${c.shortId || 'user'}</span>
-                </div>
-                <div class="contact-last" style="color:var(--blue)">Написать сообщение</div>
-            </div>
-            <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${c.id}')">
-                <i class="fas fa-ellipsis-v"></i>
-            </div>
-        `;
-        list.appendChild(div);
-    });
-}
-
-// === МЕДИА (Запись аудио и кружочков) ===
-async function toggleRecord(mode) {
-    // mode = 'audio' или 'video_note' (кружок)
-    if(mediaRecorder) { mediaRecorder.stop(); return; }
-    
-    try {
-        const constraints = mode === 'video_note' 
-            ? { audio: true, video: { facingMode: "user", aspectRatio: 1 } } 
-            : { audio: true };
-            
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        mediaRecorder = new MediaRecorder(stream);
-        recordedChunks = [];
-
-        mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
-        mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: mode === 'video_note' ? 'video/webm' : 'audio/webm' });
-            const reader = new FileReader();
-            reader.onload = () => sendMsg({ type: mode, content: reader.result });
-            reader.readAsDataURL(blob);
-            
-            stream.getTracks().forEach(t => t.stop());
-            mediaRecorder = null;
-            
-            const btnId = mode === 'video_note' ? 'videoBtn' : 'voiceBtn';
-            document.getElementById(btnId).classList.remove('rec');
-        };
-
-        mediaRecorder.start();
-        const btnId = mode === 'video_note' ? 'videoBtn' : 'voiceBtn';
-        document.getElementById(btnId).classList.add('rec');
-        
-    } catch(e) { showToast('Нужен доступ к камере/микрофону'); }
-}
-
-function sendFile(input) {
-    const file = input.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-        // Определяем тип: картинка или видео файл
-        const type = file.type.startsWith('video') ? 'video' : 'image';
-        sendMsg({ type: type, content: e.target.result });
-    };
-    reader.readAsDataURL(file);
-}
-
-// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
-function updateSelfUI() {
-    document.getElementById('myNameDisplay').innerText = state.profile.name;
-    document.getElementById('myIdDisplay').innerText = '@' + (state.profile.shortId || 'user');
-    const ava = state.profile.avatar || `https://ui-avatars.com/api/?name=${state.profile.name}`;
-    document.getElementById('myAvatarDisplay').src = ava;
-    
-    document.getElementById('setMyName').value = state.profile.name;
-    document.getElementById('setMyAvatar').value = state.profile.avatar;
-}
-
-function saveSettings() {
-    state.profile.name = document.getElementById('setMyName').value;
-    state.profile.avatar = document.getElementById('setMyAvatar').value;
-    saveState(); 
-    updateSelfUI(); 
-    db.collection("users").doc(state.profile.id).set(state.profile, {merge: true});
-    closeModals();
-}
-
-function deleteContactFromOptions() {
-    if(confirm('Удалить контакт?')) {
-        state.contacts = state.contacts.filter(c => c.id !== optionsTargetId);
-        saveState();
-        if(activeChat === optionsTargetId) closeChat();
-        renderContactList();
-        closeModals();
-    }
-}
-
-function saveState() {
-    localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts));
-}
-
-function setRandomAvatar(inputId, imgId) {
-    const n = Math.floor(Math.random() * 1000) + 1;
-    const url = `https://picsum.photos/id/${n}/200/200`;
-    document.getElementById(inputId).value = url;
-    if(imgId) document.getElementById(imgId).src = url;
-}
-
-function updatePreview(imgId, val) {
-    document.getElementById(imgId).src = val || 'https://ui-avatars.com/api/?name=?';
-}
-
-function openSettings() {
-    document.getElementById('setMyName').value = state.profile.name || '';
-    document.getElementById('setMyAvatar').value = state.profile.avatar || '';
-    openModal('modalSettings');
-}
-
-function openContactOptions(id) {
-    if(!id) return;
-    optionsTargetId = id;
-    const c = state.contacts.find(x => x.id === id);
-    document.getElementById('optName').innerText = c.name;
-    openModal('modalOptions');
-}
-
-function viewAvatarFromOptions() {
-    const c = state.contacts.find(x => x.id === optionsTargetId);
-    const src = c.avatar || `https://ui-avatars.com/api/?name=${c.name}`;
-    closeModals();
-    viewFullScreen(src);
-}
-
-function viewFullScreen(src) {
-    const lb = document.getElementById('lightbox');
-    document.getElementById('lightboxImg').src = src;
-    lb.style.display = 'flex';
-    setTimeout(() => lb.classList.add('open'), 10);
-}
-function closeLightbox() {
-    const lb = document.getElementById('lightbox');
-    lb.classList.remove('open');
-    setTimeout(() => lb.style.display = 'none', 300);
-}
-function autoResize(el) { el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
-function openModal(id) { const m = document.getElementById(id); m.style.display='flex'; setTimeout(()=>m.classList.add('open'), 10); }
-function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m => { m.classList.remove('open'); setTimeout(() => { if(m.id !== 'modalWelcome') m.style.display='none' }, 300); }); }
-function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if (currentUnsubscribe) currentUnsubscribe(); activeChat = null; renderContactList(); }
-function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0, 2500); }
-function copyMyId() { 
-    if(state.profile.shortId) {
-        navigator.clipboard.writeText(state.profile.shortId); 
-        showToast('ID скопирован: ' + state.profile.shortId);
-    }
-}
-
-document.querySelectorAll('.modal-overlay').forEach(el => {
-    el.addEventListener('click', e => { if(e.target === el && el.id !== 'modalWelcome') closeModals(); });
-});
-</script>
+<script src="script.js"></script>
 </body>
 </html>
