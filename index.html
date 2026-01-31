@@ -258,24 +258,31 @@ let currentUnsubscribe = null;
 window.onload = () => {
     auth.onAuthStateChanged(async (user) => {
         if (user) {
-            // Пользователь зашел
-            const doc = await db.collection("users").doc(user.uid).get();
-            if (doc.exists) {
-                state.profile = doc.data();
-                updateSelfUI();
-                renderContactList();
-                closeModals();
-                // Обновляем статус
-                db.collection("users").doc(user.uid).set({ lastSeen: Date.now() }, { merge: true });
-                checkUrlParams();
+            try {
+                const doc = await db.collection("users").doc(user.uid).get();
+                if (doc.exists) {
+                    state.profile = doc.data();
+                    updateSelfUI();
+                    renderContactList();
+                    closeModals();
+                    // Обновляем статус активности
+                    db.collection("users").doc(user.uid).update({ lastSeen: Date.now() }).catch(() => {});
+                    checkUrlParams();
+                } else {
+                    // Если Auth есть, а документа нет — показываем форму регистрации
+                    openModal('modalWelcome');
+                }
+            } catch (err) {
+                console.error("Ошибка доступа к профилю:", err);
+                showToast("Ошибка загрузки профиля");
             }
         } else {
-            // Пользователь не зашел
             openModal('modalWelcome');
             setRandomAvatar('setupAvatar', 'welcomePreview');
         }
     });
 };
+
 
 // === АВТОРИЗАЦИЯ И РЕГИСТРАЦИЯ ===
 async function handleAuth() {
@@ -288,42 +295,49 @@ async function handleAuth() {
     if (!email || !password) return showToast('Введите Email и Пароль');
 
     try {
-        // 1. Пробуем войти
-        await auth.signInWithEmailAndPassword(email, password);
+        // Пытаемся войти
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
         showToast("Вход выполнен!");
+        // После этого сработает onAuthStateChanged автоматически
     } catch (loginError) {
-        // 2. Если пользователя нет - регистрируем
-        if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential') {
+        // Если пользователя нет — регистрируем
+        if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential' || loginError.code === 'auth/invalid-login-credentials') {
             if (!shortId || !name) return showToast('Для регистрации нужны ID и Имя');
-            if (password.length < 6) return showToast('Пароль слишком короткий');
+            if (password.length < 6) return showToast('Пароль минимум 6 символов');
 
             try {
-                // Проверяем занят ли Short ID
+                // Проверка уникальности ID
                 const idCheck = await db.collection("users").where("shortId", "==", shortId).get();
                 if (!idCheck.empty) return showToast('Этот ID уже занят');
 
                 const newUser = await auth.createUserWithEmailAndPassword(email, password);
                 
-                // Создаем профиль
-                state.profile = {
+                const profileData = {
                     id: newUser.user.uid,
                     shortId: shortId,
                     name: name,
-                    avatar: avatar,
-                    email: email
+                    avatar: avatar || `https://ui-avatars.com/api/?name=${name}`,
+                    email: email,
+                    createdAt: Date.now()
                 };
 
-                await db.collection("users").doc(newUser.user.uid).set(state.profile);
+                // Записываем в Firestore
+                await db.collection("users").doc(newUser.user.uid).set(profileData);
+                state.profile = profileData;
+                
                 showToast("Аккаунт создан!");
-
+                closeModals();
+                updateSelfUI();
             } catch (regError) {
-                showToast(regError.message);
+                console.error(regError);
+                showToast("Ошибка регистрации: " + regError.message);
             }
         } else {
             showToast("Ошибка: " + loginError.message);
         }
     }
 }
+
 
 function logout() {
     if(confirm('Выйти из аккаунта?')) {
