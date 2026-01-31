@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>maranuchok</title>
+    <title>Maranuchok Auth</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -31,27 +32,30 @@
         .header { height: 60px; padding: 0 15px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
         .avatar { width: 44px; height: 44px; border-radius: 50%; background: #ccc; object-fit: cover; cursor: pointer; flex-shrink: 0; transition: transform 0.2s; border: 1px solid var(--border); }
         .avatar:active { transform: scale(0.95); }
-        .avatar.large { width: 120px; height: 120px; border: 4px solid var(--blue); margin: 0 auto; display: block; }
+        .avatar.large { width: 100px; height: 100px; border: 4px solid var(--blue); margin: 0 auto; display: block; }
+        
+        /* Исправленное аудио */
         audio {
-           width: 200px; 
-           height: 30px;
-    
-           /* Делаем его темным и компактным */
-           filter: invert(100%) hue-rotate(180deg) brightness(0.6) contrast(1.2);
-    
-           /* Скругляем углы по максимуму */
-           border-radius: 50px;
-    
-           /* Убираем лишний фон, если браузер его добавляет */
-           background-color: transparent;
-    
-           /* Чтобы не прилипал к краям бабла */
-           margin: 5px;
-    
-           /* Дополнительное масштабирование для компактности */
-           transform: scale(0.9);
-           transform-origin: center;
+            height: 40px;
+            max-width: 240px;
+            border-radius: 20px;
+            margin: 4px 0;
         }
+        /* Стилизация плеера для Webkit (Chrome/Safari) чтобы вписывался в баббл */
+        .msg.out audio { filter: brightness(0) invert(1) opacity(0.8); } /* Белый на синем */
+        .msg.in audio { filter: opacity(0.7); }
+
+        /* Видео кружочки */
+        video.circle-msg {
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid white;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            background: #000;
+        }
+
         .contact-list { flex: 1; overflow-y: auto; scrollbar-width: thin; }
         .contact { padding: 12px 15px; display: flex; gap: 12px; align-items: center; cursor: pointer; transition: background 0.2s; position: relative; }
         .contact:hover { background: var(--sec); }
@@ -68,9 +72,14 @@
         .msg { max-width: 75%; padding: 10px 14px; border-radius: var(--radius); font-size: 15px; position: relative; word-wrap: break-word; animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         .msg.in { background: var(--msg-in); align-self: flex-start; border-bottom-left-radius: 4px; }
         .msg.out { background: var(--msg-out); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
-        .msg img, .msg video { max-width: 100%; border-radius: 12px; margin-top: 5px; display: block; cursor: pointer; }
-        .msg-meta { font-size: 10px; opacity: 0.6; text-align: right; margin-top: 4px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
         
+        /* Убираем фон у сообщений с кружочками, чтобы было красиво */
+        .msg.has-circle { background: transparent !important; padding: 0; box-shadow: none; }
+        
+        .msg img, .msg video:not(.circle-msg) { max-width: 100%; border-radius: 12px; margin-top: 5px; display: block; cursor: pointer; }
+        .msg-meta { font-size: 10px; opacity: 0.6; text-align: right; margin-top: 4px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+        .msg.has-circle .msg-meta { color: rgba(255,255,255,0.7); text-shadow: 0 1px 2px rgba(0,0,0,0.5); position: absolute; bottom: 15px; right: 25px; }
+
         .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--hint); gap: 10px; opacity: 0.7; }
         .empty-state i { font-size: 40px; }
 
@@ -91,8 +100,8 @@
         .modal-overlay.open .modal { transform: scale(1); }
 
         .modal h3 { text-align: center; margin-bottom: 5px; }
-        .modal p { text-align: center; font-size: 14px; opacity: 0.7; margin-bottom: 10px; }
         .modal input { width: 100%; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--sec); color: var(--text); outline: none; font-size: 16px; }
+        .modal hr { border: none; height: 1px; background: var(--border); margin: 5px 0; }
         
         .modal-btn { padding: 14px; border-radius: 14px; border: none; font-weight: 600; cursor: pointer; font-size: 15px; transition: 0.2s; }
         .modal-btn.primary { background: var(--blue); color: #fff; }
@@ -130,7 +139,7 @@
         <img id="myAvatarDisplay" class="avatar" src="" onclick="openSettings()">
         <div style="flex:1; margin-left:10px; overflow:hidden;">
             <div id="myNameDisplay" style="font-weight:700; font-size:16px;">Загрузка...</div>
-            <div id="myIdDisplay" style="font-size:11px; opacity:0.6; cursor:pointer;" onclick="copyMyId()">Копировать ID</div>
+            <div id="myIdDisplay" style="font-size:12px; opacity:0.6; cursor:pointer;" onclick="copyMyId()">Нажми, чтобы скопировать ID</div>
         </div>
     </div>
     <div class="contact-list" id="contactList"></div>
@@ -154,7 +163,7 @@
         <label class="btn-icon"><i class="fas fa-paperclip"></i><input type="file" hidden onchange="sendFile(this)"></label>
         <textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this)"></textarea>
         <button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')"><i class="fas fa-microphone"></i></button>
-        <button id="videoBtn" class="btn-icon" onclick="toggleRecord('video')"><i class="fas fa-camera"></i></button>
+        <button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')"><i class="fas fa-camera"></i></button>
         <button class="btn-icon" onclick="sendMsg()"><i class="fas fa-paper-plane"></i></button>
     </div>
 </div>
@@ -163,24 +172,33 @@
 
 <div class="modal-overlay" id="modalWelcome">
     <div class="modal">
-        <h3>Добро пожаловать</h3>
+        <h3>Вход / Регистрация</h3>
         <div style="text-align:center;">
-            <img id="welcomePreview" class="avatar large" src="https://ui-avatars.com/api/?name=?&background=888&color=fff" onclick="viewFullScreen(this.src)">
+            <img id="welcomePreview" class="avatar large" src="https://ui-avatars.com/api/?name=M&background=888&color=fff">
         </div>
-        <input type="text" id="setupId" placeholder="Придумайте ID">
+        
+        <input type="email" id="setupEmail" placeholder="Email (например: user@mail.com)">
+        <input type="password" id="setupPassword" placeholder="Пароль (мин. 6 символов)">
+        
+        <hr>
+        <div style="font-size:12px; text-align:center; opacity:0.6;">Для новых пользователей:</div>
+        
+        <input type="text" id="setupShortId" placeholder="Придумайте ID (например: max2024)">
         <input type="text" id="setupName" placeholder="Ваше Имя">
+        
         <div style="display:flex; gap:8px;">
             <input type="text" id="setupAvatar" placeholder="Ссылка на фото" oninput="updatePreview('welcomePreview', this.value)">
             <button class="modal-btn sec" style="width:50px" onclick="setRandomAvatar('setupAvatar', 'welcomePreview')"><i class="fas fa-dice"></i></button>
         </div>
-        <button class="modal-btn primary" onclick="finishSetup()">Войти</button>
+        
+        <button class="modal-btn primary" onclick="handleAuth()">Продолжить</button>
     </div>
 </div>
 
 <div class="modal-overlay" id="modalAdd">
     <div class="modal">
         <h3>Новый контакт</h3>
-        <input type="text" id="addId" placeholder="ID пользователя">
+        <input type="text" id="addId" placeholder="Введите ID друга">
         <button class="modal-btn primary" onclick="addContact()">Найти</button>
         <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
     </div>
@@ -195,7 +213,7 @@
             <button class="modal-btn sec" style="width:50px" onclick="setRandomAvatar('setMyAvatar', null)"><i class="fas fa-dice"></i></button>
         </div>
         <button class="modal-btn primary" onclick="saveSettings()">Сохранить</button>
-        <button class="modal-btn danger" onclick="resetAccount()">Сбросить аккаунт</button>
+        <button class="modal-btn danger" onclick="logout()">Выйти из аккаунта</button>
         <button class="modal-btn sec" onclick="closeModals()">Закрыть</button>
     </div>
 </div>
@@ -210,6 +228,7 @@
 </div>
 
 <script>
+// === КОНФИГУРАЦИЯ FIREBASE ===
 const firebaseConfig = {
   apiKey: "AIzaSyBglqZ7HP42c3m-cjbZT95fJhttRQRxNqM",
   authDomain: "maranuchook.firebaseapp.com",
@@ -221,9 +240,11 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const auth = firebase.auth();
 
+// === СОСТОЯНИЕ ===
 let state = {
-    profile: JSON.parse(localStorage.getItem('nx3_profile')) || { name: '', id: '', avatar: '' },
+    profile: { name: '', id: '', shortId: '', avatar: '' },
     contacts: JSON.parse(localStorage.getItem('nx3_contacts')) || []
 };
 
@@ -233,37 +254,100 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let currentUnsubscribe = null;
 
+// === ИНИЦИАЛИЗАЦИЯ ===
 window.onload = () => {
-    if(!state.profile.id) {
-        openModal('modalWelcome');
-        setRandomAvatar('setupAvatar', 'welcomePreview');
-    } else {
-        updateSelfUI();
-        db.collection("users").doc(state.profile.id).set({
-            ...state.profile,
-            lastSeen: Date.now()
-        }, {merge: true});
-        
-        checkUrlParams();
-    }
-    renderContactList();
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            // Пользователь зашел
+            const doc = await db.collection("users").doc(user.uid).get();
+            if (doc.exists) {
+                state.profile = doc.data();
+                updateSelfUI();
+                renderContactList();
+                closeModals();
+                // Обновляем статус
+                db.collection("users").doc(user.uid).set({ lastSeen: Date.now() }, { merge: true });
+                checkUrlParams();
+            }
+        } else {
+            // Пользователь не зашел
+            openModal('modalWelcome');
+            setRandomAvatar('setupAvatar', 'welcomePreview');
+        }
+    });
 };
 
+// === АВТОРИЗАЦИЯ И РЕГИСТРАЦИЯ ===
+async function handleAuth() {
+    const email = document.getElementById('setupEmail').value.trim();
+    const password = document.getElementById('setupPassword').value.trim();
+    const shortId = document.getElementById('setupShortId').value.trim().toLowerCase();
+    const name = document.getElementById('setupName').value.trim();
+    const avatar = document.getElementById('setupAvatar').value;
+
+    if (!email || !password) return showToast('Введите Email и Пароль');
+
+    try {
+        // 1. Пробуем войти
+        await auth.signInWithEmailAndPassword(email, password);
+        showToast("Вход выполнен!");
+    } catch (loginError) {
+        // 2. Если пользователя нет - регистрируем
+        if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential') {
+            if (!shortId || !name) return showToast('Для регистрации нужны ID и Имя');
+            if (password.length < 6) return showToast('Пароль слишком короткий');
+
+            try {
+                // Проверяем занят ли Short ID
+                const idCheck = await db.collection("users").where("shortId", "==", shortId).get();
+                if (!idCheck.empty) return showToast('Этот ID уже занят');
+
+                const newUser = await auth.createUserWithEmailAndPassword(email, password);
+                
+                // Создаем профиль
+                state.profile = {
+                    id: newUser.user.uid,
+                    shortId: shortId,
+                    name: name,
+                    avatar: avatar,
+                    email: email
+                };
+
+                await db.collection("users").doc(newUser.user.uid).set(state.profile);
+                showToast("Аккаунт создан!");
+
+            } catch (regError) {
+                showToast(regError.message);
+            }
+        } else {
+            showToast("Ошибка: " + loginError.message);
+        }
+    }
+}
+
+function logout() {
+    if(confirm('Выйти из аккаунта?')) {
+        auth.signOut();
+        localStorage.clear();
+        location.reload();
+    }
+}
+
+// === ЧАТ И СООБЩЕНИЯ ===
 async function checkUrlParams() {
     const params = new URLSearchParams(window.location.search);
-    const chatId = params.get('chat');
+    const chatShortId = params.get('chat');
     
-    if (chatId && chatId !== state.profile.id) {
-        if (!state.contacts.find(c => c.id === chatId)) {
-            const doc = await db.collection("users").doc(chatId).get();
-            if (doc.exists) {
-                const data = doc.data();
-                state.contacts.push({ id: data.id, name: data.name, avatar: data.avatar, type: 'p2p' });
-                saveState();
-                renderContactList();
+    if (chatShortId) {
+        // Поиск по shortId
+        const query = await db.collection("users").where("shortId", "==", chatShortId).get();
+        if (!query.empty) {
+            const data = query.docs[0].data();
+            if (data.id !== state.profile.id) {
+                 addContactInternal(data);
+                 loadChat(data.id);
             }
         }
-        loadChat(chatId);
         window.history.replaceState({}, document.title, "/");
     }
 }
@@ -272,9 +356,9 @@ function getChatId(user1, user2) {
     return [user1, user2].sort().join('_');
 }
 
-function loadChat(id) {
-    activeChat = id;
-    const contact = state.contacts.find(c => c.id === id);
+function loadChat(targetUid) {
+    activeChat = targetUid;
+    const contact = state.contacts.find(c => c.id === targetUid);
     if(!contact) return;
 
     document.getElementById('chatWrap').classList.add('active');
@@ -282,9 +366,7 @@ function loadChat(id) {
     
     document.getElementById('chatName').innerText = contact.name;
     document.getElementById('chatAvatar').src = contact.avatar || `https://ui-avatars.com/api/?name=${contact.name}`;
-    
-    const isOnline = navigator.onLine;
-    document.getElementById('chatStatus').innerText = isOnline ? "В сети" : "Не в сети";
+    document.getElementById('chatStatus').innerText = "В сети"; // Можно допилить реальный статус
 
     if (currentUnsubscribe) currentUnsubscribe();
 
@@ -298,14 +380,9 @@ function loadChat(id) {
         .limit(50)
         .onSnapshot((snapshot) => {
             if (snapshot.empty) {
-                msgsContainer.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-comments"></i>
-                        <div>Нет сообщений</div>
-                    </div>`;
+                msgsContainer.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><div>Нет сообщений</div></div>';
                 return;
             }
-            
             const msgs = [];
             snapshot.forEach(doc => msgs.push(doc.data()));
             renderMessages(msgs);
@@ -319,19 +396,29 @@ function renderMessages(msgs) {
     msgs.forEach(m => {
         const isMine = m.sender === state.profile.id;
         let content = '';
+        let extraClass = '';
         
-        if(m.type === 'text') content = m.content.replace(/\n/g, '<br>');
-        else if(m.type === 'image') content = `<img src="${m.content}" onclick="viewFullScreen(this.src)">`;
-        else if(m.type === 'audio') content = `<audio controls src="${m.content}"></audio>`;
-        else if(m.type === 'video') content = `<video src="${m.content}" controls loop muted></video>`;
+        if(m.type === 'text') {
+            content = m.content.replace(/\n/g, '<br>');
+        } else if(m.type === 'image') {
+            content = `<img src="${m.content}" onclick="viewFullScreen(this.src)">`;
+        } else if(m.type === 'audio') {
+            content = `<audio controls src="${m.content}"></audio>`;
+        } else if(m.type === 'video') {
+            content = `<video src="${m.content}" controls></video>`;
+        } else if(m.type === 'video_note') {
+            // КРУЖОЧКИ
+            extraClass = 'has-circle';
+            content = `<video class="circle-msg" src="${m.content}" autoplay loop muted onclick="this.muted=!this.muted"></video>`;
+        }
 
         const div = document.createElement('div');
-        div.className = `msg ${isMine ? 'out' : 'in'}`;
+        div.className = `msg ${isMine ? 'out' : 'in'} ${extraClass}`;
         div.innerHTML = `
             ${content}
             <div class="msg-meta">
                 ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                ${isMine ? '<i class="fas fa-check" style="font-size:10px"></i>' : ''}
+                ${isMine ? '<i class="fas fa-check"></i>' : ''}
             </div>
         `;
         list.appendChild(div);
@@ -346,7 +433,6 @@ async function sendMsg(payload = null) {
     if(!text && !payload) return;
 
     const combinedId = getChatId(state.profile.id, activeChat);
-
     const msgData = {
         chatId: combinedId,
         sender: state.profile.id,
@@ -361,43 +447,39 @@ async function sendMsg(payload = null) {
         textInput.value = '';
         autoResize(textInput);
     } catch (e) {
-        showToast("Ошибка сети");
+        showToast("Ошибка отправки");
     }
 }
 
+// === КОНТАКТЫ ===
 async function addContact() {
-    const id = document.getElementById('addId').value.trim();
-    if(!id) return;
-    if(id === state.profile.id) return showToast('Это ваш ID');
+    const searchShortId = document.getElementById('addId').value.trim().toLowerCase();
+    if(!searchShortId) return;
+    if(searchShortId === state.profile.shortId) return showToast('Это ваш ID');
     
-    const userDoc = await db.collection("users").doc(id).get();
+    // Ищем по shortId
+    const query = await db.collection("users").where("shortId", "==", searchShortId).get();
     
-    if(userDoc.exists) {
-        const userData = userDoc.data();
-        if(!state.contacts.find(c => c.id === id)) {
-            state.contacts.push({ 
-                id: userData.id, 
-                name: userData.name, 
-                avatar: userData.avatar, 
-                type: 'p2p' 
-            });
-            saveState();
-            renderContactList();
-        }
+    if(!query.empty) {
+        const userData = query.docs[0].data();
+        addContactInternal(userData);
         closeModals();
-        loadChat(id);
+        loadChat(userData.id);
     } else {
         showToast("Пользователь не найден");
     }
 }
 
-function deleteContactFromOptions() {
-    if(confirm('Удалить чат?')) {
-        state.contacts = state.contacts.filter(c => c.id !== optionsTargetId);
+function addContactInternal(userData) {
+    if(!state.contacts.find(c => c.id === userData.id)) {
+        state.contacts.push({ 
+            id: userData.id, 
+            name: userData.name, 
+            avatar: userData.avatar, 
+            shortId: userData.shortId 
+        });
         saveState();
-        if(activeChat === optionsTargetId) closeChat();
         renderContactList();
-        closeModals();
     }
 }
 
@@ -413,8 +495,11 @@ function renderContactList() {
         div.innerHTML = `
             <img src="${avatarSrc}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${avatarSrc}')">
             <div class="contact-info" onclick="loadChat('${c.id}')">
-                <div class="contact-name">${c.name}</div>
-                <div class="contact-last" style="color:var(--blue)">Открыть чат</div>
+                <div class="contact-name">
+                    ${c.name}
+                    <span style="font-size:10px; opacity:0.5; font-weight:400">@${c.shortId || 'user'}</span>
+                </div>
+                <div class="contact-last" style="color:var(--blue)">Написать сообщение</div>
             </div>
             <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${c.id}')">
                 <i class="fas fa-ellipsis-v"></i>
@@ -424,26 +509,62 @@ function renderContactList() {
     });
 }
 
-function updateSelfUI() {
-    document.getElementById('myNameDisplay').innerText = state.profile.name;
-    const ava = state.profile.avatar || `https://ui-avatars.com/api/?name=${state.profile.name}`;
-    document.getElementById('myAvatarDisplay').src = ava;
-    document.getElementById('setMyName').value = state.profile.name;
-    document.getElementById('setMyAvatar').value = state.profile.avatar;
+// === МЕДИА (Запись аудио и кружочков) ===
+async function toggleRecord(mode) {
+    // mode = 'audio' или 'video_note' (кружок)
+    if(mediaRecorder) { mediaRecorder.stop(); return; }
+    
+    try {
+        const constraints = mode === 'video_note' 
+            ? { audio: true, video: { facingMode: "user", aspectRatio: 1 } } 
+            : { audio: true };
+            
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        mediaRecorder = new MediaRecorder(stream);
+        recordedChunks = [];
+
+        mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: mode === 'video_note' ? 'video/webm' : 'audio/webm' });
+            const reader = new FileReader();
+            reader.onload = () => sendMsg({ type: mode, content: reader.result });
+            reader.readAsDataURL(blob);
+            
+            stream.getTracks().forEach(t => t.stop());
+            mediaRecorder = null;
+            
+            const btnId = mode === 'video_note' ? 'videoBtn' : 'voiceBtn';
+            document.getElementById(btnId).classList.remove('rec');
+        };
+
+        mediaRecorder.start();
+        const btnId = mode === 'video_note' ? 'videoBtn' : 'voiceBtn';
+        document.getElementById(btnId).classList.add('rec');
+        
+    } catch(e) { showToast('Нужен доступ к камере/микрофону'); }
 }
 
-async function finishSetup() {
-    const id = document.getElementById('setupId').value.trim();
-    const name = document.getElementById('setupName').value.trim();
-    if(!id || !name) return showToast('Заполните поля');
+function sendFile(input) {
+    const file = input.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+        // Определяем тип: картинка или видео файл
+        const type = file.type.startsWith('video') ? 'video' : 'image';
+        sendMsg({ type: type, content: e.target.result });
+    };
+    reader.readAsDataURL(file);
+}
+
+// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+function updateSelfUI() {
+    document.getElementById('myNameDisplay').innerText = state.profile.name;
+    document.getElementById('myIdDisplay').innerText = '@' + (state.profile.shortId || 'user');
+    const ava = state.profile.avatar || `https://ui-avatars.com/api/?name=${state.profile.name}`;
+    document.getElementById('myAvatarDisplay').src = ava;
     
-    const avatar = document.getElementById('setupAvatar').value;
-    state.profile = { id, name, avatar };
-    
-    await db.collection("users").doc(id).set(state.profile);
-    
-    localStorage.setItem('nx3_profile', JSON.stringify(state.profile));
-    location.reload();
+    document.getElementById('setMyName').value = state.profile.name;
+    document.getElementById('setMyAvatar').value = state.profile.avatar;
 }
 
 function saveSettings() {
@@ -455,21 +576,23 @@ function saveSettings() {
     closeModals();
 }
 
-function resetAccount() {
-    if(confirm('Это удалит ваш профиль с этого устройства. ID останется занятым в базе.')) {
-        localStorage.clear();
-        location.reload();
+function deleteContactFromOptions() {
+    if(confirm('Удалить контакт?')) {
+        state.contacts = state.contacts.filter(c => c.id !== optionsTargetId);
+        saveState();
+        if(activeChat === optionsTargetId) closeChat();
+        renderContactList();
+        closeModals();
     }
 }
 
 function saveState() {
     localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts));
-    localStorage.setItem('nx3_profile', JSON.stringify(state.profile));
 }
 
 function setRandomAvatar(inputId, imgId) {
-    const n = Math.floor(Math.random() * 2000) + 1;
-    const url = `https://yavuzceliker.github.io/sample-images/image-${n}.jpg`;
+    const n = Math.floor(Math.random() * 1000) + 1;
+    const url = `https://picsum.photos/id/${n}/200/200`;
     document.getElementById(inputId).value = url;
     if(imgId) document.getElementById(imgId).src = url;
 }
@@ -510,56 +633,17 @@ function closeLightbox() {
     lb.classList.remove('open');
     setTimeout(() => lb.style.display = 'none', 300);
 }
-
-async function toggleRecord(type) {
-    if(mediaRecorder) { mediaRecorder.stop(); return; }
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: type === 'video' });
-        mediaRecorder = new MediaRecorder(stream);
-        recordedChunks = [];
-        mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
-        mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: type === 'video' ? 'video/webm' : 'audio/webm' });
-            const reader = new FileReader();
-            reader.onload = () => sendMsg({ type: type, content: reader.result });
-            reader.readAsDataURL(blob);
-            stream.getTracks().forEach(t => t.stop());
-            mediaRecorder = null;
-            document.getElementById(type+'Btn').classList.remove('rec');
-        };
-        mediaRecorder.start();
-        document.getElementById(type+'Btn').classList.add('rec');
-    } catch(e) { showToast('Нет доступа к микрофону/камере'); }
-}
-
-function sendFile(input) {
-    const file = input.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = e => sendMsg({ type: 'image', content: e.target.result });
-    reader.readAsDataURL(file);
-}
-
 function autoResize(el) { el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
-function openModal(id) { 
-    const m = document.getElementById(id); m.style.display='flex'; 
-    setTimeout(()=>m.classList.add('open'), 10); 
-}
-function closeModals() { 
-    document.querySelectorAll('.modal-overlay').forEach(m => { 
-        m.classList.remove('open'); 
-        setTimeout(() => { if(m.id !== 'modalWelcome') m.style.display='none' }, 300); 
-    }); 
-}
-function closeChat() { 
-    document.getElementById('chatWrap').classList.remove('active'); 
-    document.getElementById('sidebar').classList.remove('hidden'); 
-    if (currentUnsubscribe) currentUnsubscribe();
-    activeChat = null; 
-    renderContactList(); 
-}
+function openModal(id) { const m = document.getElementById(id); m.style.display='flex'; setTimeout(()=>m.classList.add('open'), 10); }
+function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m => { m.classList.remove('open'); setTimeout(() => { if(m.id !== 'modalWelcome') m.style.display='none' }, 300); }); }
+function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if (currentUnsubscribe) currentUnsubscribe(); activeChat = null; renderContactList(); }
 function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0, 2500); }
-function copyMyId() { navigator.clipboard.writeText(state.profile.id); showToast('ID скопирован'); }
+function copyMyId() { 
+    if(state.profile.shortId) {
+        navigator.clipboard.writeText(state.profile.shortId); 
+        showToast('ID скопирован: ' + state.profile.shortId);
+    }
+}
 
 document.querySelectorAll('.modal-overlay').forEach(el => {
     el.addEventListener('click', e => { if(e.target === el && el.id !== 'modalWelcome') closeModals(); });
