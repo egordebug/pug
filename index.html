@@ -359,33 +359,42 @@ function getChatId(user1, user2) {
 function loadChat(targetUid) {
     activeChat = targetUid;
     const contact = state.contacts.find(c => c.id === targetUid);
-    if(!contact) return;
+    if (!contact) return;
 
+    // Переключаем интерфейс на мобилках
     document.getElementById('chatWrap').classList.add('active');
     document.getElementById('sidebar').classList.add('hidden');
     
+    // Заполняем шапку чата
     document.getElementById('chatName').innerText = contact.name;
     document.getElementById('chatAvatar').src = contact.avatar || `https://ui-avatars.com/api/?name=${contact.name}`;
-    document.getElementById('chatStatus').innerText = "В сети"; // Можно допилить реальный статус
+    document.getElementById('chatStatus').innerText = "В сети";
 
+    // Отписываемся от предыдущего чата, если он был открыт
     if (currentUnsubscribe) currentUnsubscribe();
 
     const combinedId = getChatId(state.profile.id, activeChat);
     const msgsContainer = document.getElementById('messages');
     msgsContainer.innerHTML = '';
 
+    // Слушаем базу данных в реальном времени
     currentUnsubscribe = db.collection("messages")
         .where("chatId", "==", combinedId)
         .orderBy("time", "asc")
-        .limit(50)
         .onSnapshot((snapshot) => {
-            if (snapshot.empty) {
-                msgsContainer.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><div>Нет сообщений</div></div>';
-                return;
-            }
             const msgs = [];
-            snapshot.forEach(doc => msgs.push(doc.data()));
+            snapshot.forEach(doc => {
+                // Собираем данные сообщения + добавляем его уникальный ID из Firebase
+                msgs.push({ 
+                    id: doc.id, 
+                    ...doc.data() 
+                }); 
+            });
+            // Рисуем сообщения в чате
             renderMessages(msgs);
+        }, (error) => {
+            console.error("Ошибка при получении сообщений:", error);
+            showToast("Ошибка доступа к чату");
         });
 }
 
@@ -398,33 +407,43 @@ function renderMessages(msgs) {
         let content = '';
         let extraClass = '';
         
-        if(m.type === 'text') {
-            content = m.content.replace(/\n/g, '<br>');
-        } else if(m.type === 'image') {
-            content = `<img src="${m.content}" onclick="viewFullScreen(this.src)">`;
-        } else if(m.type === 'audio') {
-            content = `<audio controls src="${m.content}"></audio>`;
-        } else if(m.type === 'video') {
-            content = `<video src="${m.content}" controls></video>`;
-        } else if(m.type === 'video_note') {
-            // КРУЖОЧКИ
+        if (m.type === 'text') content = m.content.replace(/\n/g, '<br>');
+        else if (m.type === 'image') content = `<img src="${m.content}" onclick="viewFullScreen(this.src)">`;
+        else if (m.type === 'audio') content = `<audio controls src="${m.content}"></audio>`;
+        else if (m.type === 'video') content = `<video src="${m.content}" controls style="max-width:100%; border-radius:12px;"></video>`;
+        else if (m.type === 'video_note') {
             extraClass = 'has-circle';
-            content = `<video class="circle-msg" src="${m.content}" autoplay loop muted onclick="this.muted=!this.muted"></video>`;
+            content = `<video class="circle-msg" src="${m.content}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
         }
 
         const div = document.createElement('div');
         div.className = `msg ${isMine ? 'out' : 'in'} ${extraClass}`;
+        // Добавляем ID документа из Firebase, чтобы знать, что удалять
+        if (m.id) div.setAttribute('data-msg-id', m.id); 
+
+        // События для долгого нажатия (только для своих сообщений)
+        if (isMine) {
+            div.onmousedown = (e) => startPress(e, m.id, div);
+            div.onmouseup = () => cancelPress(div);
+            div.ontouchstart = (e) => startPress(e, m.id, div);
+            div.ontouchend = () => cancelPress(div);
+        }
+
         div.innerHTML = `
             ${content}
             <div class="msg-meta">
                 ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                ${isMine ? '<i class="fas fa-check"></i>' : ''}
+                ${isMine ? '<i class="fas fa-check" style="margin-left:3px; font-size:9px;"></i>' : ''}
             </div>
         `;
         list.appendChild(div);
     });
-    list.scrollTop = list.scrollHeight;
+
+    setTimeout(() => {
+        list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+    }, 100);
 }
+
 
 async function sendMsg(payload = null) {
     if(!activeChat) return;
@@ -448,6 +467,47 @@ async function sendMsg(payload = null) {
         autoResize(textInput);
     } catch (e) {
         showToast("Ошибка отправки");
+    }
+}
+let pressTimer;
+let redTimer;
+
+function startPress(e, msgId, element) {
+    // 1. Через 3 секунды зажатия — сообщение краснеет
+    pressTimer = setTimeout(() => {
+        element.style.transition = 'all 2s ease';
+        element.style.background = 'var(--red)';
+        element.style.color = '#fff';
+        
+        // 2. Еще через 2 секунды (итого 5) — вылетает confirm
+        redTimer = setTimeout(() => {
+            if (confirm('Удалить это сообщение для всех?')) {
+                deleteMessage(msgId);
+            } else {
+                cancelPress(element); // Сброс стиля, если передумал
+            }
+        }, 2000);
+        
+    }, 3000);
+}
+
+function cancelPress(element) {
+    clearTimeout(pressTimer);
+    clearTimeout(redTimer);
+    // Возвращаем стандартный цвет, если отпустили раньше времени
+    element.style.transition = '0.3s';
+    element.style.background = ''; 
+    element.style.color = '';
+}
+
+async function deleteMessage(msgId) {
+    if (!msgId) return;
+    try {
+        await db.collection("messages").doc(msgId).delete();
+        showToast("Сообщение удалено");
+    } catch (e) {
+        showToast("Ошибка при удалении");
+        console.error(e);
     }
 }
 
