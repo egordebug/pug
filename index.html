@@ -33,11 +33,24 @@
         .avatar:active { transform: scale(0.95); }
         .avatar.large { width: 120px; height: 120px; border: 4px solid var(--blue); margin: 0 auto; display: block; }
         audio {
-           width: 240px;
-           height: 40px;
-           filter: invert(100%) hue-rotate(180deg) brightness(1.5); /* Подгонка под светлую/темную тему */
-           border-radius: 20px;
-           background: rgba(255, 255, 255, 0.1);
+           width: 200px; 
+           height: 30px;
+    
+           /* Делаем его темным и компактным */
+           filter: invert(100%) hue-rotate(180deg) brightness(0.6) contrast(1.2);
+    
+           /* Скругляем углы по максимуму */
+           border-radius: 50px;
+    
+           /* Убираем лишний фон, если браузер его добавляет */
+           background-color: transparent;
+    
+           /* Чтобы не прилипал к краям бабла */
+           margin: 5px;
+    
+           /* Дополнительное масштабирование для компактности */
+           transform: scale(0.9);
+           transform-origin: center;
         }
         .contact-list { flex: 1; overflow-y: auto; scrollbar-width: thin; }
         .contact { padding: 12px 15px; display: flex; gap: 12px; align-items: center; cursor: pointer; transition: background 0.2s; position: relative; }
