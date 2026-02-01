@@ -205,6 +205,10 @@ function loadChat(targetId, type = 'user') {
     activeChat = targetId;
     activeChatType = type;
     
+    // 1. Сразу чистим экран, чтобы не видеть сообщения из прошлого чата
+    const list = document.getElementById('messages');
+    list.innerHTML = '<div style="text-align:center; padding:20px; opacity:0.5;">Загрузка...</div>';
+    
     // UI переключение
     document.getElementById('chatWrap').classList.add('active');
     document.getElementById('sidebar').classList.add('hidden');
@@ -226,26 +230,41 @@ function loadChat(targetId, type = 'user') {
     document.getElementById('chatName').innerText = name;
     document.getElementById('chatAvatar').src = avatar;
     
-    if (currentUnsubscribe) currentUnsubscribe();
-
-    // Формируем запрос
-    let query = db.collection("messages").orderBy("time", "asc");
-
-    if (type === 'group') {
-        // Для групп ищем по groupId
-        query = query.where("groupId", "==", targetId);
-    } else {
-        // Для лички по chatId
-        const combinedId = getChatId(state.profile.id, targetId);
-        query = query.where("chatId", "==", combinedId);
+    // 2. Отписываемся от старого чата перед созданием нового слушателя
+    if (currentUnsubscribe) {
+        currentUnsubscribe();
+        currentUnsubscribe = null;
     }
 
-    currentUnsubscribe = query.onSnapshot((snapshot) => {
+    // 3. Формируем чистый запрос
+    let msgQuery = db.collection("messages");
+
+    if (type === 'group') {
+        // Ищем ТОЛЬКО по groupId
+        msgQuery = msgQuery.where("groupId", "==", targetId);
+    } else {
+        // Ищем ТОЛЬКО по chatId (личка)
+        const combinedId = getChatId(state.profile.id, targetId);
+        msgQuery = msgQuery.where("chatId", "==", combinedId);
+    }
+
+    // Добавляем сортировку по времени
+    msgQuery = msgQuery.orderBy("time", "asc");
+
+    currentUnsubscribe = msgQuery.onSnapshot((snapshot) => {
         const msgs = [];
-        snapshot.forEach(doc => msgs.push({ id: doc.id, ...doc.data() }));
+        snapshot.forEach(doc => {
+            msgs.push({ id: doc.id, ...doc.data() });
+        });
         renderMessages(msgs);
+    }, (error) => {
+        console.error("Ошибка Firestore:", error);
+        if (error.code === 'failed-precondition') {
+            showToast("Нужно создать индексы в консоли Firebase");
+        }
     });
 }
+
 
 function renderMessages(msgs) {
     const list = document.getElementById('messages');
@@ -296,6 +315,7 @@ async function sendMsg(payload = null) {
     const text = textInput.value.trim();
     if(!text && !payload) return;
 
+    // Базовый объект сообщения
     const msgData = {
         sender: state.profile.id,
         senderName: state.profile.name,
@@ -304,11 +324,15 @@ async function sendMsg(payload = null) {
         time: Date.now()
     };
 
-    // ВАЖНО: Разделяем логику для Групп и Лички
+    // Разделяем: либо chatId (личка), либо groupId (группа)
     if (activeChatType === 'group') {
-        msgData.groupId = activeChat; // Для Rules groups
+        msgData.groupId = activeChat;
+        // Убеждаемся, что chatId не попадет в базу
+        if (msgData.chatId) delete msgData.chatId;
     } else {
-        msgData.chatId = getChatId(state.profile.id, activeChat); // Для Rules direct
+        msgData.chatId = getChatId(state.profile.id, activeChat);
+        // Убеждаемся, что groupId не попадет в базу
+        if (msgData.groupId) delete msgData.groupId;
     }
 
     try {
@@ -316,8 +340,8 @@ async function sendMsg(payload = null) {
         textInput.value = '';
         autoResize(textInput);
     } catch (e) {
-        console.error(e);
-        showToast("Ошибка отправки (проверь права)");
+        console.error("Ошибка при отправке:", e);
+        showToast("Ошибка отправки. Проверьте консоль.");
     }
 }
 
