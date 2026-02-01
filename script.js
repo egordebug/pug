@@ -11,21 +11,23 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const auth = firebase.auth();
+const storage = firebase.storage();
 
 // === СОСТОЯНИЕ ===
 let state = {
-    profile: { name: '', id: '', shortId: '', avatar: '' },
-    contacts: JSON.parse(localStorage.getItem('nx3_contacts')) || [],
-    groups: [] // Сюда будем грузить группы из базы
+    profile: { name: '', id: '', shortId: '', avatar: '', contacts: [] },
+    contacts: [],
+    groups: []
 };
 
-let activeChat = null; // ID юзера ИЛИ ID группы
-let activeChatType = null; // 'user' или 'group'
+let activeChat = null;
+let activeChatType = null; // 'user' or 'group'
 let optionsTargetId = null;
 let mediaRecorder = null;
 let recordedChunks = [];
 let currentUnsubscribe = null;
 let groupsUnsubscribe = null;
+let lastSendTime = 0;
 
 // === ИНИЦИАЛИЗАЦИЯ ===
 window.onload = () => {
@@ -41,8 +43,8 @@ window.onload = () => {
                     // 2. Слушаем группы, где я участник
                     listenToGroups(user.uid);
                     
-                    // 3. Рендерим контакты
-                    renderContactList();
+                    // 3. Загружаем контакты
+                    await loadMyContacts();
                     
                     closeModals();
                     db.collection("users").doc(user.uid).update({ lastSeen: Date.now() }).catch(()=>{});
@@ -61,9 +63,23 @@ window.onload = () => {
     });
 };
 
-// === ГРУППЫ: Логика ===
+// === ЗАГРУЗКА КОНТАКТОВ ===
+async function loadMyContacts() {
+    const doc = await db.collection("users").doc(state.profile.id).get();
+    const uids = doc.data()?.contacts || [];
 
-// Слушаем изменения в коллекциях групп, где есть мой ID
+    if (uids.length === 0) {
+        state.contacts = [];
+        renderContactList();
+        return;
+    }
+
+    const snap = await db.collection("users").where(firebase.firestore.FieldPath.documentId(), "in", uids).get();
+    state.contacts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderContactList();
+}
+
+// === ГРУППЫ ===
 function listenToGroups(myUid) {
     if(groupsUnsubscribe) groupsUnsubscribe();
     
@@ -86,11 +102,9 @@ function openCreateGroupModal() {
     list.innerHTML = '';
     
     if (!state.contacts || state.contacts.length === 0) {
-        // Если контактов нет — скрываем блок со списком
         contactSection.style.display = 'none';
         manualLabel.innerText = "У вас нет контактов. Введите ID участников через запятую:";
     } else {
-        // Если контакты есть — показываем всё красиво
         contactSection.style.display = 'block';
         manualLabel.innerText = "Или добавьте других по ID (через запятую):";
         
@@ -99,9 +113,9 @@ function openCreateGroupModal() {
             div.className = 'user-select-item';
             div.style = 'display:flex; align-items:center; padding:8px; gap:10px; border-bottom:1px solid var(--sec);';
             div.innerHTML = `
-                <input type="checkbox" value="${c.id}" id="chk_${c.id}" style="width:18px; height:18px;">
+                <input type="checkbox" value="\( {c.id}" id="chk_ \){c.id}" style="width:18px; height:18px;">
                 <img src="${c.avatar}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;">
-                <label for="chk_${c.id}" style="flex:1; cursor:pointer; font-size:14px;">${c.name}</label>
+                <label for="chk_\( {c.id}" style="flex:1; cursor:pointer; font-size:14px;"> \){c.name}</label>
             `;
             list.appendChild(div);
         });
@@ -109,7 +123,6 @@ function openCreateGroupModal() {
     
     openModal('modalCreateGroup');
 }
-
 
 async function finishCreateGroup() {
     const name = document.getElementById('newGroupName').value.trim();
@@ -124,7 +137,6 @@ async function finishCreateGroup() {
     try {
         if (manualInput) {
             const manualIds = manualInput.split(',').map(id => id.trim().toLowerCase()).filter(id => id);
-            // Ищем UID по коротким ID в базе
             const usersSnap = await db.collection("users").where("shortId", "in", manualIds).get();
             usersSnap.forEach(doc => finalUids.push(doc.data().id));
         }
@@ -142,14 +154,10 @@ async function finishCreateGroup() {
 
         showToast('Группа создана!');
         closeModals();
-        // Очистка полей
-        document.getElementById('newGroupName').value = '';
-        document.getElementById('manualIds').value = '';
     } catch(e) {
         showToast('Ошибка. Проверьте правильность ID');
     }
 }
-
 
 // === АВТОРИЗАЦИЯ ===
 async function handleAuth() {
@@ -167,7 +175,6 @@ async function handleAuth() {
     } catch (loginError) {
         if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential') {
             if (!shortId || !name) return showToast('Для регистрации нужны ID и Имя');
-            // Проверка ID (теперь разрешена правилами)
             const idCheck = await db.collection("users").where("shortId", "==", shortId).get();
             if (!idCheck.empty) return showToast('Этот ID уже занят');
 
@@ -205,12 +212,10 @@ function loadChat(targetId, type = 'user') {
     activeChat = targetId;
     activeChatType = type;
     
-    // 1. Сразу чистим экран, чтобы не видеть сообщения из прошлого чата
     const list = document.getElementById('messages');
     list.innerHTML = '<div style="text-align:center; padding:20px; opacity:0.5;">Загрузка...</div>';
     
-    // UI переключение
-    document.getElementById('chatWrap').classList.add('active');
+    document.getElementById('chatArea').classList.add('active');
     document.getElementById('sidebar').classList.add('hidden');
     
     let name, avatar;
@@ -230,25 +235,20 @@ function loadChat(targetId, type = 'user') {
     document.getElementById('chatName').innerText = name;
     document.getElementById('chatAvatar').src = avatar;
     
-    // 2. Отписываемся от старого чата перед созданием нового слушателя
     if (currentUnsubscribe) {
         currentUnsubscribe();
         currentUnsubscribe = null;
     }
 
-    // 3. Формируем чистый запрос
     let msgQuery = db.collection("messages");
 
     if (type === 'group') {
-        // Ищем ТОЛЬКО по groupId
         msgQuery = msgQuery.where("groupId", "==", targetId);
     } else {
-        // Ищем ТОЛЬКО по chatId (личка)
         const combinedId = getChatId(state.profile.id, targetId);
         msgQuery = msgQuery.where("chatId", "==", combinedId);
     }
 
-    // Добавляем сортировку по времени
     msgQuery = msgQuery.orderBy("time", "asc");
 
     currentUnsubscribe = msgQuery.onSnapshot((snapshot) => {
@@ -264,7 +264,6 @@ function loadChat(targetId, type = 'user') {
         }
     });
 }
-
 
 function renderMessages(msgs) {
     const list = document.getElementById('messages');
@@ -287,7 +286,6 @@ function renderMessages(msgs) {
         const div = document.createElement('div');
         div.className = `msg ${isMine ? 'out' : 'in'} ${extraClass}`;
         
-        // Показываем имя отправителя в группе, если это не я
         let senderLabel = '';
         if(activeChatType === 'group' && !isMine) {
             senderLabel = `<div style="font-size:10px; color:var(--blue); margin-bottom:2px;">${m.senderName || 'User'}</div>`;
@@ -310,12 +308,15 @@ function renderMessages(msgs) {
 }
 
 async function sendMsg(payload = null) {
+    const now = Date.now();
+    if (now - lastSendTime < 700) return showToast("Не так быстро");
+    lastSendTime = now;
+
     if(!activeChat) return;
     const textInput = document.getElementById('msgInput');
     const text = textInput.value.trim();
     if(!text && !payload) return;
 
-    // Базовый объект сообщения
     const msgData = {
         sender: state.profile.id,
         senderName: state.profile.name,
@@ -324,15 +325,10 @@ async function sendMsg(payload = null) {
         time: Date.now()
     };
 
-    // Разделяем: либо chatId (личка), либо groupId (группа)
     if (activeChatType === 'group') {
         msgData.groupId = activeChat;
-        // Убеждаемся, что chatId не попадет в базу
-        if (msgData.chatId) delete msgData.chatId;
     } else {
         msgData.chatId = getChatId(state.profile.id, activeChat);
-        // Убеждаемся, что groupId не попадет в базу
-        if (msgData.groupId) delete msgData.groupId;
     }
 
     try {
@@ -354,7 +350,7 @@ function renderContactList() {
     const list = document.getElementById('contactList');
     list.innerHTML = '';
     
-    // 1. Сначала рисуем ГРУППЫ
+    // Группы
     state.groups.forEach(g => {
         const div = document.createElement('div');
         div.className = `contact ${activeChat === g.id ? 'active' : ''}`;
@@ -368,12 +364,12 @@ function renderContactList() {
         list.appendChild(div);
     });
 
-    // 2. Потом контакты
+    // Контакты
     state.contacts.forEach(c => {
         const div = document.createElement('div');
         div.className = `contact ${activeChat === c.id ? 'active' : ''}`;
         div.innerHTML = `
-            <img src="${c.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${c.avatar}')">
+            <img src="\( {c.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen(' \){c.avatar}')">
             <div class="contact-info" onclick="loadChat('${c.id}', 'user')">
                 <div class="contact-name">${c.name}</div>
                 <div class="contact-last">@${c.shortId}</div>
@@ -393,11 +389,10 @@ async function addContact() {
     const query = await db.collection("users").where("shortId", "==", searchShortId).get();
     if(!query.empty) {
         const userData = query.docs[0].data();
-        if(!state.contacts.find(c => c.id === userData.id)) {
-            state.contacts.push(userData);
-            localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts));
-            renderContactList();
-        }
+        await db.collection("users").doc(state.profile.id).update({
+            contacts: firebase.firestore.FieldValue.arrayUnion(userData.id)
+        });
+        await loadMyContacts();
         closeModals();
         loadChat(userData.id, 'user');
     } else {
@@ -414,11 +409,10 @@ async function toggleRecord(mode) {
         mediaRecorder = new MediaRecorder(stream);
         recordedChunks = [];
         mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
-        mediaRecorder.onstop = () => {
+        mediaRecorder.onstop = async () => {
             const blob = new Blob(recordedChunks, { type: mode === 'video_note' ? 'video/webm' : 'audio/webm' });
-            const reader = new FileReader();
-            reader.onload = () => sendMsg({ type: mode, content: reader.result });
-            reader.readAsDataURL(blob);
+            const url = await uploadMedia(blob, mode);
+            sendMsg({ type: mode, content: url });
             stream.getTracks().forEach(t => t.stop());
             mediaRecorder = null;
             document.getElementById(mode === 'video_note' ? 'videoBtn' : 'voiceBtn').classList.remove('rec');
@@ -428,12 +422,20 @@ async function toggleRecord(mode) {
     } catch(e) { showToast('Нет доступа к микро/камере'); }
 }
 
-function sendFile(input) {
+async function uploadMedia(blob, type) {
+    const ext = type === 'video_note' ? 'webm' : type === 'audio' ? 'webm' : type === 'video' ? 'mp4' : 'jpg';
+    const ref = storage.ref(`media/\( {state.profile.id}/ \){Date.now()}.${ext}`);
+    await ref.put(blob);
+    return await ref.getDownloadURL();
+}
+
+async function sendFile(input) {
     const file = input.files[0];
     if(!file) return;
-    const reader = new FileReader();
-    reader.onload = e => sendMsg({ type: file.type.startsWith('video') ? 'video' : 'image', content: e.target.result });
-    reader.readAsDataURL(file);
+    const blob = file;
+    const type = file.type.startsWith('video') ? 'video' : 'image';
+    const url = await uploadMedia(blob, type);
+    sendMsg({ type, content: url });
 }
 
 // === UI UTILS ===
@@ -461,8 +463,10 @@ function updatePreview(id, v) { document.getElementById(id).src = v || 'https://
 function openSettings() { openModal('modalSettings'); }
 function openContactOptions(id) { if(!id || activeChatType==='group')return; optionsTargetId=id; openModal('modalOptions'); }
 function deleteContactFromOptions() { 
-    state.contacts = state.contacts.filter(c => c.id !== optionsTargetId); 
-    localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts)); 
+    db.collection("users").doc(state.profile.id).update({
+        contacts: firebase.firestore.FieldValue.arrayRemove(optionsTargetId)
+    });
+    loadMyContacts();
     closeChat(); closeModals(); 
 }
 function viewAvatarFromOptions() { 
@@ -474,7 +478,7 @@ function closeLightbox() { document.getElementById('lightbox').classList.remove(
 function autoResize(el) { el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
 function openModal(id) { document.getElementById(id).style.display='flex'; setTimeout(()=>document.getElementById(id).classList.add('open'),10); }
 function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m=>{ m.classList.remove('open'); setTimeout(()=>m.style.display='none',300); }); }
-function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
+function closeChat() { document.getElementById('chatArea').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
 function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,2500); }
 function copyMyId() { navigator.clipboard.writeText(state.profile.shortId); showToast('ID скопирован'); }
 
