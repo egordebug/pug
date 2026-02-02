@@ -1,4 +1,4 @@
-/* Маранючок v2.0 — Glassmorphism 2026 edition */
+/* Маранючок v1.5 glass*/
 
 :root {
     --bg: #f8f9fc;
@@ -314,3 +314,4 @@ body {
     .chat-area { transform: translateX(100%); }
     .chat-area.active { transform: translateX(0); }
   }
+
