@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Маранючок v1.5</title>
+    <title>Maranuchook</title>
     
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -11,130 +11,142 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="black-theme">
 
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
-    <img id="lightboxImg" src="">
+    <img id="lightboxImg" src="" alt="Full view">
 </div>
 
 <div class="toast" id="toast"></div>
 
-<div class="sidebar" id="sidebar">
-    <div class="header">
-        <img id="myAvatarDisplay" class="avatar" src="" onclick="openSettings()">
-        <div style="flex:1; margin-left:10px; overflow:hidden;">
-            <div id="myNameDisplay" style="font-weight:700; font-size:16px;">Загрузка...</div>
-            <div id="myIdDisplay" style="font-size:12px; opacity:0.6; cursor:pointer;" onclick="copyMyId()">Нажми, чтобы скопировать ID</div>
-        </div>
-    </div>
-    
-    <div class="contact-list" id="contactList"></div>
+<div class="app-container">
+    <aside class="sidebar" id="sidebar">
+        <header class="header">
+            <div class="avatar-wrapper">
+                <img id="myAvatarDisplay" class="avatar" src="" onclick="openSettings()" alt="My Profile">
+            </div>
+            <div class="user-brief">
+                <h2 id="myNameDisplay">Загрузка...</h2>
+                <span id="myIdDisplay" onclick="copyMyId()">Копировать ID</span>
+            </div>
+            <button class="btn-icon" onclick="openSettings()"><i class="fas fa-cog"></i></button>
+        </header>
+        
+        <nav class="contact-list" id="contactList"></nav>
 
-    <button class="fab" onclick="toggleFabMenu()"><i class="fas fa-plus"></i></button>
-    
-    <div class="fab-menu" id="fabMenu">
-        <div class="fab-item" onclick="openModal('modalAdd'); toggleFabMenu()">
-            <i class="fas fa-user-plus"></i> Найти друга
+        <button class="fab" onclick="toggleFabMenu()"><i class="fas fa-plus"></i></button>
+        
+        <div class="fab-menu" id="fabMenu">
+            <div class="fab-item" onclick="openModal('modalAdd'); toggleFabMenu()">
+                <i class="fas fa-user-plus"></i> <span>Найти друга</span>
+            </div>
+            <div class="fab-item" onclick="openCreateGroupModal(); toggleFabMenu()">
+                <i class="fas fa-users"></i> <span>Группа</span>
+            </div>
         </div>
-        <div class="fab-item" onclick="openCreateGroupModal(); toggleFabMenu()">
-            <i class="fas fa-users"></i> Создать группу
-        </div>
-    </div>
-</div>
+    </aside>
 
-<div class="chat-area" id="chatArea">
-    <div class="header">
-        <button class="btn-icon" onclick="closeChat()"><i class="fas fa-chevron-left"></i></button>
-        <img id="chatAvatar" class="avatar" src="" onclick="viewFullScreen(this.src)">
-        <div style="flex:1; margin-left: 10px; cursor:pointer; overflow:hidden;" onclick="openContactOptions(activeChat)">
-            <div id="chatName" style="font-weight:600">Выберите чат</div>
-            <div id="chatStatus" style="font-size:12px; color:var(--blue)">Ожидание...</div>
-        </div>
-        <button class="btn-icon" onclick="openContactOptions(activeChat)"><i class="fas fa-ellipsis-v"></i></button>
-    </div>
-    
-    <div class="messages" id="messages"></div>
+    <main class="chat-area" id="chatArea">
+        <header class="header">
+            <button class="btn-icon mobile-only" onclick="closeChat()"><i class="fas fa-chevron-left"></i></button>
+            <img id="chatAvatar" class="avatar" src="" onclick="viewFullScreen(this.src)">
+            <div class="chat-meta" onclick="openContactOptions(activeChat)">
+                <h2 id="chatName">Выберите чат</h2>
+                <span id="chatStatus">...</span>
+            </div>
+            <button class="btn-icon" onclick="openContactOptions(activeChat)"><i class="fas fa-ellipsis-v"></i></button>
+        </header>
+        
+        <section class="messages" id="messages"></section>
 
-    <div class="input-bar" id="inputBar">
-        <label class="btn-icon"><i class="fas fa-paperclip"></i><input type="file" hidden onchange="sendFile(this)"></label>
-        <textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this)"></textarea>
-        <button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')"><i class="fas fa-microphone"></i></button>
-        <button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')"><i class="fas fa-camera"></i></button>
-        <button class="btn-icon" onclick="sendMsg()"><i class="fas fa-paper-plane"></i></button>
-    </div>
+        <footer class="input-bar" id="inputBar">
+            <label class="btn-icon">
+                <i class="fas fa-paperclip"></i>
+                <input type="file" hidden onchange="sendFile(this)" accept="image/*,video/*">
+            </label>
+            <textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" autocomplete="off"></textarea>
+            
+            <div class="input-actions">
+                <button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')"><i class="fas fa-microphone"></i></button>
+                <button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')"><i class="fas fa-camera"></i></button>
+                <button class="btn-icon send" onclick="sendMsg()"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </footer>
+    </main>
 </div>
 
 <div class="modal-overlay" id="modalWelcome">
-    <div class="modal">
-        <h3>Вход / Регистрация</h3>
-        <div style="text-align:center;">
-            <img id="welcomePreview" class="avatar large" src="https://ui-avatars.com/api/?name=M&background=888&color=fff">
+    <div class="modal glass">
+        <h3>Добро пожаловать</h3>
+        <div class="avatar-picker">
+            <img id="welcomePreview" class="avatar large" src="https://ui-avatars.com/api/?name=U">
+            <button class="btn-dice" onclick="setRandomAvatar('setupAvatar', 'welcomePreview')"><i class="fas fa-dice"></i></button>
         </div>
-        <input type="email" id="setupEmail" placeholder="Email">
-        <input type="password" id="setupPassword" placeholder="Пароль">
-        <hr style="border:none; height:1px; background:var(--border);">
-        <input type="text" id="setupShortId" placeholder="Придумайте ID (например: max2024)">
-        <input type="text" id="setupName" placeholder="Ваше Имя">
-        <div style="display:flex; gap:8px;">
-            <input type="text" id="setupAvatar" placeholder="Ссылка на фото" oninput="updatePreview('welcomePreview', this.value)">
-            <button class="modal-btn sec" style="width:50px" onclick="setRandomAvatar('setupAvatar', 'welcomePreview')"><i class="fas fa-dice"></i></button>
+        <div class="input-group">
+            <input type="email" id="setupEmail" placeholder="Email">
+            <input type="password" id="setupPassword" placeholder="Пароль">
+            <div class="divider"></div>
+            <input type="text" id="setupShortId" placeholder="Ваш username">
+            <input type="text" id="setupName" placeholder="Имя профиля">
+            <input type="hidden" id="setupAvatar">
         </div>
-        <button class="modal-btn primary" onclick="handleAuth()">Продолжить</button>
-    </div>
-</div>
-
-<div class="modal-overlay" id="modalAdd">
-    <div class="modal">
-        <h3>Новый контакт</h3>
-        <input type="text" id="addId" placeholder="Введите ID друга">
-        <button class="modal-btn primary" onclick="addContact()">Найти</button>
-        <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
+        <button class="modal-btn primary" onclick="handleAuth()">Начать общение</button>
     </div>
 </div>
 
 <div class="modal-overlay" id="modalCreateGroup">
-    <div class="modal">
-        <h3>Создать группу</h3>
-        <input type="text" id="newGroupName" placeholder="Название группы">
+    <div class="modal glass" style="max-width: 420px;">
+        <h3 id="groupModalTitle">Новая группа</h3>
         
-        <div id="groupContactSection">
-            <div style="font-size:12px; opacity:0.7; margin-bottom:5px;">Выберите друзей:</div>
-            <div class="user-select-list" id="groupUserList"></div>
+        <div id="groupStep1">
+            <div class="avatar-picker" style="margin-bottom: 20px;">
+                <img id="newGroupPreview" class="avatar large" src="https://ui-avatars.com/api/?name=?">
+                <button class="btn-dice" onclick="Utils.setRandomAvatar('newGroupAvatar', 'newGroupPreview')"><i class="fas fa-dice"></i></button>
+            </div>
+            <div class="input-group">
+                <input type="text" id="newGroupName" placeholder="Название группы" oninput="updateGroupPreview(this.value)">
+                <input type="text" id="newGroupAvatar" placeholder="Ссылка на аву (необязательно)" oninput="document.getElementById('newGroupPreview').src = this.value">
+            </div>
+            <div class="modal-buttons" style="margin-top: 20px;">
+                <button class="modal-btn primary" onclick="groupStep(2)">Далее <i class="fas fa-arrow-right"></i></button>
+                <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
+            </div>
         </div>
 
-        <div style="margin-top: 10px;">
-            <div id="manualLabel" style="font-size:12px; opacity:0.7; margin-bottom:5px;">Или введите ID через запятую:</div>
-            <input type="text" id="manualIds" placeholder="id1, id2, id3">
-        </div>
+        <div id="groupStep2" style="display: none;">
+            <div class="search-box" style="margin-bottom: 15px;">
+                <input type="text" id="groupUserSearch" placeholder="Поиск по ID..." oninput="searchUserForGroup(this.value)">
+            </div>
+            
+            <div id="searchResult" style="margin-bottom: 10px;"></div>
 
-        <button class="modal-btn primary" onclick="finishCreateGroup()">Создать группу</button>
-        <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
+            <div style="font-size: 12px; color: var(--text-sec); margin-bottom: 8px;">Выбранные участники:</div>
+            <div id="selectedUsersList" class="user-select-list" style="max-height: 180px; overflow-y: auto;">
+                </div>
+
+            <div class="input-group" style="margin-top: 15px;">
+                <input type="text" id="manualIds" placeholder="Или ID через запятую (id1, id2)">
+            </div>
+
+            <div class="modal-buttons" style="margin-top: 20px;">
+                <button class="modal-btn primary" onclick="finishCreateGroup()">Создать группу</button>
+                <button class="modal-btn sec" onclick="groupStep(1)">Назад</button>
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="modal-overlay" id="modalSettings">
-    <div class="modal">
-        <h3>Настройки профиля</h3>
-        <input type="text" id="setMyName" placeholder="Имя">
-        <div style="display:flex; gap:8px;">
-            <input type="text" id="setMyAvatar" placeholder="Ссылка на аватар">
-            <button class="modal-btn sec" style="width:50px" onclick="setRandomAvatar('setMyAvatar', null)"><i class="fas fa-dice"></i></button>
-        </div>
-        <button class="modal-btn primary" onclick="saveSettings()">Сохранить</button>
-        <button class="modal-btn danger" onclick="logout()">Выйти из аккаунта</button>
-        <button class="modal-btn sec" onclick="closeModals()">Закрыть</button>
-    </div>
-</div>
 
-<div class="modal-overlay" id="modalOptions">
-    <div class="modal">
-        <h3 id="optName">Опции</h3>
-        <button class="modal-btn primary" onclick="viewAvatarFromOptions()">Смотреть аватар</button>
-        <button class="modal-btn danger" onclick="deleteContactFromOptions()">Удалить чат</button>
-        <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
+<div class="modal-overlay" id="modalAdd">
+    <div class="modal glass">
+        <h3>Добавить друга</h3>
+        <input type="text" id="addId" placeholder="ID пользователя...">
+        <div class="modal-buttons">
+            <button class="modal-btn primary" onclick="addContact()">Найти</button>
+            <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
+        </div>
     </div>
 </div>
 
