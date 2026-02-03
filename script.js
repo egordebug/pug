@@ -432,14 +432,12 @@ const Utils = {
         return div;
     },
     scrollToBottom: () => {
-        const d = document.getElementById('messages');
-        d.scrollTo({ top: d.scrollHeight, behavior: 'smooth' });
-    },
-    escapeHtml: (text) => {
-        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-        return text.replace(/[&<>"']/g, function(m) { return map[m]; });
-    }
-};
+    const d = document.getElementById('messages');
+    requestAnimationFrame(() => {
+        d.scrollTop = d.scrollHeight;
+    });
+},
+
 
 // Хелперы для HTML кнопок
 function val(id) { return document.getElementById(id).value; }
@@ -520,7 +518,19 @@ function openContactOptions(id) {
     document.getElementById('optName').innerText = data.name;
     UI.openModal('modalOptions');
 }
-
+function closeChat() {
+    const sidebar = document.getElementById('sidebar');
+    const chatArea = document.getElementById('chatArea');
+    
+    if (sidebar) sidebar.classList.remove('hidden');
+    if (chatArea) chatArea.classList.remove('active');
+    
+    state.activeChat = null;
+    if (state.listeners.chat) {
+        state.listeners.chat();
+        state.listeners.chat = null;
+    }
+}
 async function deleteContactFromOptions() {
     if (!confirm('Удалить этот чат из списка контактов? История сообщений не удалится.')) return;
 
