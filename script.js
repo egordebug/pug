@@ -13,20 +13,22 @@ const db = firebase.firestore();
 const auth = firebase.auth();
 
 // === СОСТОЯНИЕ ===
+// === СОСТОЯНИЕ ===
 let state = {
     profile: { name: '', id: '', shortId: '', avatar: '' },
-    contacts: [], // Теперь просто пустой массив, он заполнится из базы
+    contacts: [], 
     groups: [] 
 };
 
-
-let activeChat = null; // ID юзера ИЛИ ID группы
-let activeChatType = null; // 'user' или 'group'
+let activeChat = null; 
+let activeChatType = null; 
 let optionsTargetId = null;
 let mediaRecorder = null;
 let recordedChunks = [];
 let currentUnsubscribe = null;
-let groupsUnsubscribe = null;
+let groupsUnsubscribe = null; // Оставляем ОДИН РАЗ тут
+let chatsUnsubscribe = null;  // Добавляем сюда
+
 
 // === ИНИЦИАЛИЗАЦИЯ ===
 window.onload = () => {
@@ -374,9 +376,6 @@ async function sendMsg(payload = null) {
     }
 }
 
-async function deleteMessage(msgId) {
-    try { await db.collection("messages").doc(msgId).delete(); } catch(e){}
-}
 
 // === СПИСОК КОНТАКТОВ И ГРУПП ===
 function renderContactList() {
@@ -522,11 +521,33 @@ function saveSettings() {
     db.collection("users").doc(state.profile.id).set(state.profile, {merge:true});
     updateSelfUI(); closeModals();
 }
-function checkUrlParams() {
+async function checkUrlParams() {
     const p = new URLSearchParams(window.location.search);
-    const chat = p.get('chat');
-    if(chat) { /* Логика диплинка */ }
+    const inviteGroupId = p.get('invite');
+
+    if (inviteGroupId && state.profile.id) {
+        try {
+            const groupDoc = await db.collection("groups").doc(inviteGroupId).get();
+            if (!groupDoc.exists) return showToast("Группа не найдена");
+
+            const groupData = groupDoc.data();
+            if (groupData.members.includes(state.profile.id)) {
+                loadChat(inviteGroupId, 'group');
+            } else {
+                if (confirm(`Вступить в группу "${groupData.name}"?`)) {
+                    await db.collection("groups").doc(inviteGroupId).update({
+                        members: firebase.firestore.FieldValue.arrayUnion(state.profile.id)
+                    });
+                    showToast("Вы вступили!");
+                    loadChat(inviteGroupId, 'group');
+                }
+            }
+            // Убираем параметр из строки адреса, чтобы не спрашивало при перезагрузке
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (e) { console.error(e); }
+    }
 }
+
 function toggleFabMenu() { document.getElementById('fabMenu').classList.toggle('open'); }
 function setRandomAvatar(inId, imgId) { const u = `https://picsum.photos/id/${Math.floor(Math.random()*1000)}/200`; document.getElementById(inId).value=u; if(imgId)document.getElementById(imgId).src=u; }
 function updatePreview(id, v) { document.getElementById(id).src = v || 'https://ui-avatars.com/api/?name=?'; }
@@ -538,24 +559,34 @@ function openContactOptions(id) {
     const optName = document.getElementById('optName');
     const modal = document.getElementById('modalOptions');
     
-    // Очищаем старые кнопки "добавить", если они были (чтобы не дублировались)
-    const oldBtn = document.getElementById('tempAddBtn');
-    if(oldBtn) oldBtn.remove();
+    // Чистим старые динамические кнопки
+    document.querySelectorAll('.temp-btn').forEach(b => b.remove());
 
     if (activeChatType === 'group') {
         const grp = state.groups.find(g => g.id === id);
         optName.innerText = grp ? grp.name : 'Настройки группы';
         
-        // Создаем кнопку "Добавить участника" динамически
+        // Кнопка ДОБАВИТЬ по ID
         const addBtn = document.createElement('button');
-        addBtn.id = 'tempAddBtn';
-        addBtn.className = 'modal-btn primary';
+        addBtn.className = 'modal-btn primary temp-btn';
         addBtn.style.marginBottom = '10px';
         addBtn.innerText = '➕ Добавить участника';
         addBtn.onclick = () => { closeModals(); inviteToGroup(); };
         
-        // Вставляем кнопку перед кнопкой "Отмена"
+        // Кнопка КОПИРОВАТЬ ССЫЛКУ
+        const linkBtn = document.createElement('button');
+        linkBtn.className = 'modal-btn sec temp-btn';
+        linkBtn.style.marginBottom = '10px';
+        linkBtn.innerHTML = '<i class="fas fa-link"></i> Ссылка-инвайт';
+        linkBtn.onclick = () => {
+            const link = window.location.origin + window.location.pathname + '?invite=' + id;
+            navigator.clipboard.writeText(link);
+            showToast("Ссылка скопирована!");
+            closeModals();
+        };
+        
         modal.querySelector('.modal').insertBefore(addBtn, modal.querySelector('.modal-btn.sec'));
+        modal.querySelector('.modal').insertBefore(linkBtn, modal.querySelector('.modal-btn.sec'));
     } else {
         const c = state.contacts.find(x => x.id === id);
         optName.innerText = c ? c.name : 'Опции';
@@ -564,11 +595,34 @@ function openContactOptions(id) {
     openModal('modalOptions');
 }
 
-function deleteContactFromOptions() { 
-    state.contacts = state.contacts.filter(c => c.id !== optionsTargetId); 
-    localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts)); 
-    closeChat(); closeModals(); 
+
+async function deleteMessage(msgId) {
+    try { await db.collection("messages").doc(msgId).delete(); } catch(e){}
 }
+
+// Замени эту функцию:
+async function deleteContactFromOptions() { 
+    if(!confirm('Удалить этот чат для вас? (Внимание: это удалит запись о контакте в базе)')) return;
+    
+    try {
+        if (activeChatType === 'user') {
+            const chatId = getChatId(state.profile.id, optionsTargetId);
+            await db.collection("chats").doc(chatId).delete();
+            showToast("Чат удален");
+        } else {
+            // Если это группа — просто выходим из неё
+            await db.collection("groups").doc(optionsTargetId).update({
+                members: firebase.firestore.FieldValue.arrayRemove(state.profile.id)
+            });
+            showToast("Вы вышли из группы");
+        }
+        closeChat(); 
+        closeModals();
+    } catch(e) {
+        showToast("Ошибка при удалении");
+    }
+}
+
 function viewAvatarFromOptions() { 
     const c = state.contacts.find(x => x.id === optionsTargetId); 
     if(c) viewFullScreen(c.avatar); closeModals(); 
