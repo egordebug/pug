@@ -1,3 +1,4 @@
+// === КОНФИГУРАЦИЯ FIREBASE ===
 const firebaseConfig = {
   apiKey: "AIzaSyBglqZ7HP42c3m-cjbZT95fJhttRQRxNqM",
   authDomain: "maranuchook.firebaseapp.com",
@@ -7,683 +8,474 @@ const firebaseConfig = {
   appId: "1:607472317729:web:6838cbe7645855800aba60"
 };
 
-// Инициализация
-if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const auth = firebase.auth();
-const storage = firebase.storage();
 
-// === ГЛОБАЛЬНОЕ СОСТОЯНИЕ ===
-const state = {
-    user: null,         // Текущий профиль пользователя
-    contacts: [],       // Список друзей
-    groups: [],         // Список групп
-    activeChat: null,   // ID открытого чата
-    chatType: null,     // 'user' или 'group'
-    listeners: {        // Активные подписки (чтобы отключать их)
-        chat: null,
-        groups: null
-    },
-    mediaRecorder: null,
-    chunks: []
+// === СОСТОЯНИЕ ===
+let state = {
+    profile: { name: '', id: '', shortId: '', avatar: '' },
+    contacts: JSON.parse(localStorage.getItem('nx3_contacts')) || [],
+    groups: [] // Сюда будем грузить группы из базы
 };
 
-// === 1. ИНИЦИАЛИЗАЦИЯ И AUTH ===
+let activeChat = null; // ID юзера ИЛИ ID группы
+let activeChatType = null; // 'user' или 'group'
+let optionsTargetId = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let currentUnsubscribe = null;
+let groupsUnsubscribe = null;
 
+// === ИНИЦИАЛИЗАЦИЯ ===
 window.onload = () => {
-    // Проверка авторизации
-    auth.onAuthStateChanged(async (firebaseUser) => {
-        if (firebaseUser) {
-            await loadUserProfile(firebaseUser.uid);
-            initApp();
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            try {
+                // 1. Грузим профиль
+                const doc = await db.collection("users").doc(user.uid).get();
+                if (doc.exists) {
+                    state.profile = doc.data();
+                    updateSelfUI();
+                    
+                    // 2. Слушаем группы, где я участник
+                    listenToGroups(user.uid);
+                    
+                    // 3. Рендерим контакты
+                    renderContactList();
+                    
+                    closeModals();
+                    db.collection("users").doc(user.uid).update({ lastSeen: Date.now() }).catch(()=>{});
+                    checkUrlParams();
+                } else {
+                    openModal('modalWelcome');
+                }
+            } catch (err) {
+                console.error("Error:", err);
+                showToast("Ошибка загрузки профиля");
+            }
         } else {
-            UI.openModal('modalWelcome');
-            Utils.setRandomAvatar('setupAvatar', 'welcomePreview');
-        }
-    });
-
-    // Авто-ресайз поля ввода
-    const input = document.getElementById('msgInput');
-    input.addEventListener('input', function() {
-        this.style.height = 'auto'; 
-        this.style.height = (this.scrollHeight) + 'px';
-    });
-    
-    // Отправка по Enter (Shift+Enter для переноса)
-    input.addEventListener('keydown', (e) => {
-        if(e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMsg();
+            openModal('modalWelcome');
+            setRandomAvatar('setupAvatar', 'welcomePreview');
         }
     });
 };
 
-async function handleAuth() {
-    const email = val('setupEmail');
-    const pass = val('setupPassword');
-    const shortId = val('setupShortId').toLowerCase();
-    const name = val('setupName');
-    const avatar = val('setupAvatar');
+// === ГРУППЫ: Логика ===
 
-    if (!email || !pass) return UI.toast('Введите Email и пароль');
-
-    try {
-        // Пробуем войти
-        await auth.signInWithEmailAndPassword(email, pass);
-    } catch (e) {
-        // Если пользователя нет — регистрируем
-        if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential') {
-            if (!shortId || !name) return UI.toast('Заполните все поля для регистрации');
-            
-            // Проверка уникальности ID
-            const check = await db.collection('users').where('shortId', '==', shortId).get();
-            if (!check.empty) return UI.toast('Этот ID занят');
-
-            const cred = await auth.createUserWithEmailAndPassword(email, pass);
-            const newUser = {
-                id: cred.user.uid,
-                email, shortId, name,
-                avatar: avatar || `https://ui-avatars.com/api/?name=${name}`,
-                contacts: [],
-                createdAt: Date.now()
-            };
-            
-            await db.collection('users').doc(cred.user.uid).set(newUser);
-            state.user = newUser;
-        } else {
-            UI.toast(e.message);
-        }
-    }
-    UI.closeModals();
-}
-
-async function loadUserProfile(uid) {
-    const doc = await db.collection('users').doc(uid).get();
-    if (doc.exists) {
-        state.user = doc.data();
-        updateHeaderUI();
-        // Обновляем статус "в сети"
-        db.collection('users').doc(uid).update({ lastSeen: Date.now() });
-    }
-}
-
-function initApp() {
-    loadContacts();
-    listenToGroups();
-    UI.closeModals();
-}
-
-// === 2. ДАННЫЕ (КОНТАКТЫ И ГРУППЫ) ===
-
-async function loadContacts() {
-    if (!state.user.contacts || !state.user.contacts.length) return renderContactList();
+// Слушаем изменения в коллекциях групп, где есть мой ID
+function listenToGroups(myUid) {
+    if(groupsUnsubscribe) groupsUnsubscribe();
     
-    // Firestore in-query (до 10 элементов, для продакшена лучше разбивать на части)
-    const chunks = [];
-    const list = state.user.contacts;
-    for (let i = 0; i < list.length; i += 10) {
-        chunks.push(list.slice(i, i + 10));
-    }
-
-    state.contacts = [];
-    for (const chunk of chunks) {
-        const snap = await db.collection('users').where(firebase.firestore.FieldPath.documentId(), 'in', chunk).get();
-        snap.forEach(doc => state.contacts.push({ id: doc.id, ...doc.data() }));
-    }
-    renderContactList();
-}
-
-function listenToGroups() {
-    if (state.listeners.groups) state.listeners.groups();
-    state.listeners.groups = db.collection('groups')
-        .where('members', 'array-contains', state.user.id)
-        .onSnapshot(snap => {
-            state.groups = snap.docs.map(d => ({ id: d.id, ...d.data(), type: 'group' }));
+    groupsUnsubscribe = db.collection("groups")
+        .where("members", "array-contains", myUid)
+        .onSnapshot(snapshot => {
+            state.groups = [];
+            snapshot.forEach(doc => {
+                state.groups.push({ id: doc.id, ...doc.data(), type: 'group' });
+            });
             renderContactList();
         });
 }
 
-async function addContact() {
-    const targetId = val('addId').trim().toLowerCase();
-    if (!targetId) return;
-    
-    const snap = await db.collection('users').where('shortId', '==', targetId).get();
-    if (snap.empty) return UI.toast('Пользователь не найден');
-    
-    const friend = snap.docs[0].data();
-    if (friend.id === state.user.id) return UI.toast('Это вы');
-
-    await db.collection('users').doc(state.user.id).update({
-        contacts: firebase.firestore.FieldValue.arrayUnion(friend.id)
-    });
-    
-    state.user.contacts.push(friend.id);
-    await loadContacts();
-    UI.closeModals();
-    UI.toast('Контакт добавлен');
-}
-
-// === 3. РЕНДЕРИНГ ИНТЕРФЕЙСА ===
-
-function renderContactList() {
-    const list = document.getElementById('contactList');
-    list.innerHTML = '';
-
-    // Сначала группы
-    state.groups.forEach(g => {
-        const el = Utils.createContactEl(g, true);
-        el.onclick = () => openChat(g.id, 'group', g);
-        list.appendChild(el);
-    });
-
-    // Потом люди
-    state.contacts.forEach(c => {
-        const el = Utils.createContactEl(c, false);
-        el.onclick = () => openChat(c.id, 'user', c);
-        list.appendChild(el);
-    });
-}
-
-function updateHeaderUI() {
-    document.getElementById('myAvatarDisplay').src = state.user.avatar;
-    document.getElementById('myNameDisplay').innerText = state.user.name;
-    document.getElementById('myIdDisplay').innerText = '@' + state.user.shortId;
-}
-
-// === 4. ЧАТ (ЯДРО) ===
-
-function openChat(id, type, data) {
-    if (state.activeChat === id) return;
-    
-    state.activeChat = id;
-    state.chatType = type;
-
-    // UI Переключения
-    document.querySelectorAll('.contact').forEach(c => c.classList.remove('active'));
-    // (Тут можно добавить подсветку активного контакта по ID)
-    
-    // Мобильная адаптация
-    document.getElementById('sidebar').classList.add('hidden');
-    document.getElementById('chatArea').classList.add('active');
-
-    // Заголовок чата
-    document.getElementById('chatAvatar').src = data.avatar;
-    document.getElementById('chatName').innerText = data.name;
-    document.getElementById('chatStatus').innerText = type === 'group' 
-        ? `${data.members.length} участников` 
-        : `@${data.shortId}`;
-
-    // Загрузка сообщений
-    loadMessages(id, type);
-}
-
-function loadMessages(targetId, type) {
-    const list = document.getElementById('messages');
-    list.innerHTML = ''; // Очистка
-    
-    if (state.listeners.chat) state.listeners.chat();
-
-    let query = db.collection('messages');
-    
-    if (type === 'group') {
-        query = query.where('groupId', '==', targetId);
-    } else {
-        // Генерируем уникальный ID диалога: minUID_maxUID
-        const chatId = [state.user.id, targetId].sort().join('_');
-        query = query.where('chatId', '==', chatId);
-    }
-
-    state.listeners.chat = query.orderBy('time', 'asc').onSnapshot(snapshot => {
-        // Используем docChanges для оптимизации (чтобы не перерисовывать всё)
-        snapshot.docChanges().forEach(change => {
-            if (change.type === 'added') {
-                renderMessage(change.doc.data(), change.doc.id);
-            }
-        });
-        Utils.scrollToBottom();
-    });
-}
-
-function renderMessage(msg, id) {
-    const list = document.getElementById('messages');
-    const isMine = msg.sender === state.user.id;
-    
-    const div = document.createElement('div');
-    div.className = `msg ${isMine ? 'out' : 'in'}`;
-    
-    let contentHtml = '';
-    
-    switch(msg.type) {
-        case 'text': 
-            contentHtml = Utils.escapeHtml(msg.content).replace(/\n/g, '<br>'); 
-            break;
-        case 'image': 
-            contentHtml = `<div class="msg-content"><img src="${msg.content}" onclick="viewFullScreen(this.src)" loading="lazy"></div>`; 
-            break;
-        case 'video':
-            contentHtml = `<video src="${msg.content}" controls style="max-width:100%; border-radius:12px;"></video>`;
-            break;
-        case 'audio':
-            contentHtml = `<audio controls src="${msg.content}"></audio>`;
-            break;
-        case 'video_note':
-            contentHtml = `<video src="${msg.content}" autoplay loop muted playsinline style="width:140px; height:140px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);" onclick="this.muted=!this.muted"></video>`;
-            break;
-    }
-
-    // Имя отправителя в группах
-    const senderHtml = (state.chatType === 'group' && !isMine) 
-        ? `<span class="sender-name">${msg.senderName}</span>` : '';
-
-    div.innerHTML = `
-        ${senderHtml}
-        ${contentHtml}
-        <div class="msg-meta">
-            ${new Date(msg.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-        </div>
-    `;
-    
-    list.appendChild(div);
-}
-
-async function sendMsg(customPayload = null) {
-    if (!state.activeChat) return;
-
-    const input = document.getElementById('msgInput');
-    const text = input.value.trim();
-    
-    if (!text && !customPayload) return;
-
-    const msgData = {
-        sender: state.user.id,
-        senderName: state.user.name,
-        time: Date.now(),
-        type: customPayload ? customPayload.type : 'text',
-        content: customPayload ? customPayload.content : text
-    };
-
-    if (state.chatType === 'group') {
-        msgData.groupId = state.activeChat;
-    } else {
-        msgData.chatId = [state.user.id, state.activeChat].sort().join('_');
-    }
-
-    try {
-        await db.collection('messages').add(msgData);
-        if (!customPayload) {
-            input.value = '';
-            input.style.height = '42px'; // Сброс высоты
-        }
-    } catch (e) {
-        UI.toast('Ошибка отправки');
-    }
-}
-
-// === 5. МЕДИА (ФОТО, ГОЛОС, ВИДЕО-КРУЖКИ) ===
-
-async function sendFile(input) {
-    const file = input.files[0];
-    if (!file) return;
-    
-    UI.toast('Загрузка...');
-    const type = file.type.startsWith('video') ? 'video' : 'image';
-    const url = await uploadToStorage(file, type);
-    sendMsg({ type, content: url });
-    input.value = ''; // Сброс
-}
-
-async function toggleRecord(mode) {
-    const btn = document.getElementById(mode === 'audio' ? 'voiceBtn' : 'videoBtn');
-    
-    if (state.mediaRecorder) {
-        state.mediaRecorder.stop();
-        btn.classList.remove('rec');
-        return;
-    }
-
-    try {
-        const constraints = mode === 'audio' ? { audio: true } : { video: { facingMode: "user", aspectRatio: 1 }, audio: true };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        
-        state.mediaRecorder = new MediaRecorder(stream);
-        state.chunks = [];
-
-        state.mediaRecorder.ondataavailable = e => state.chunks.push(e.data);
-        state.mediaRecorder.onstop = async () => {
-            UI.toast('Отправка...');
-            const blob = new Blob(state.chunks, { type: mode === 'audio' ? 'audio/webm' : 'video/webm' });
-            const url = await uploadToStorage(blob, mode === 'audio' ? 'audio' : 'video_note', 'webm');
-            sendMsg({ type: mode === 'audio' ? 'audio' : 'video_note', content: url });
-            
-            stream.getTracks().forEach(t => t.stop()); // Выключаем камеру/микро
-            state.mediaRecorder = null;
-        };
-
-        state.mediaRecorder.start();
-        btn.classList.add('rec');
-        UI.toast(mode === 'audio' ? 'Запись голоса...' : 'Запись видео...');
-
-    } catch (e) {
-        UI.toast('Нет доступа к микрофону/камере');
-    }
-}
-
-async function uploadToStorage(blob, folder, ext = 'jpg') {
-    const ref = storage.ref(`media/${state.user.id}/${Date.now()}.${ext}`);
-    await ref.put(blob);
-    return await ref.getDownloadURL();
-}
-
-// === 6. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (UI) ===
-
-function closeChat() {
-    document.getElementById('sidebar').classList.remove('hidden');
-    document.getElementById('chatArea').classList.remove('active');
-    state.activeChat = null;
-    if (state.listeners.chat) {
-        state.listeners.chat();
-        state.listeners.chat = null;
-    }
-}
-
-const UI = {
-    openModal: (id) => {
-        const el = document.getElementById(id);
-        if(el) {
-            el.style.display = 'flex';
-            setTimeout(() => el.classList.add('open'), 10);
-        }
-    },
-    closeModals: () => {
-        document.querySelectorAll('.modal-overlay').forEach(el => {
-            el.classList.remove('open');
-            setTimeout(() => el.style.display = 'none', 300);
-        });
-    },
-    toast: (msg) => {
-        const t = document.getElementById('toast');
-        t.innerText = msg;
-        t.style.opacity = 1;
-        setTimeout(() => t.style.opacity = 0, 3000);
-    }
-};
-
-const Utils = {
-    setRandomAvatar: (inputId, imgId) => {
-        const url = `https://ui-avatars.com/api/?name=${Math.random().toString(36).substring(7)}&background=random&color=fff`;
-        document.getElementById(inputId).value = url;
-        if(imgId) document.getElementById(imgId).src = url;
-    },
-    createContactEl: (data, isGroup) => {
-        const div = document.createElement('div');
-        div.className = 'contact';
-        div.innerHTML = `
-            <img src="${data.avatar}" class="avatar">
-            <div style="flex:1; overflow:hidden;">
-                <div style="font-weight:600; font-size:15px; color:var(--text)">
-                    ${isGroup ? '<i class="fas fa-users" style="font-size:12px; margin-right:5px"></i>' : ''}
-                    ${data.name}
-                </div>
-                <div style="font-size:13px; color:var(--text-sec); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
-                    ${isGroup ? 'Группа' : '@' + data.shortId}
-                </div>
-            </div>
-        `;
-        return div;
-    },
-    scrollToBottom: () => {
-    const d = document.getElementById('messages');
-    requestAnimationFrame(() => {
-        d.scrollTop = d.scrollHeight;
-    });
-},
-
-
-// Хелперы для HTML кнопок
-function val(id) { return document.getElementById(id).value; }
-function toggleFabMenu() { document.getElementById('fabMenu').classList.toggle('open'); }
-function viewFullScreen(src) { document.getElementById('lightboxImg').src = src; document.getElementById('lightbox').classList.add('open'); }
-function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
-function openModal(id) { UI.openModal(id); }
-function closeModals() { UI.closeModals(); }
-function copyMyId() { navigator.clipboard.writeText(state.user.shortId); UI.toast('Скопировано'); }
-
-// Заглушки для недостающих модалок (на случай клика)
-// === 7. СОЗДАНИЕ ГРУПП ===
-
-async function openCreateGroupModal() {
+function openCreateGroupModal() {
     const list = document.getElementById('groupUserList');
+    const contactSection = document.getElementById('groupContactSection');
+    const manualLabel = document.getElementById('manualLabel');
+    
     list.innerHTML = '';
     
-    if (!state.contacts.length) {
-        list.innerHTML = '<div style="font-size:12px; opacity:0.5; padding:10px;">Сначала добавьте хотя бы одного друга</div>';
+    if (!state.contacts || state.contacts.length === 0) {
+        // Если контактов нет — скрываем блок со списком
+        contactSection.style.display = 'none';
+        manualLabel.innerText = "У вас нет контактов. Введите ID участников через запятую:";
+    } else {
+        // Если контакты есть — показываем всё красиво
+        contactSection.style.display = 'block';
+        manualLabel.innerText = "Или добавьте других по ID (через запятую):";
+        
+        state.contacts.forEach(c => {
+            const div = document.createElement('div');
+            div.className = 'user-select-item';
+            div.style = 'display:flex; align-items:center; padding:8px; gap:10px; border-bottom:1px solid var(--sec);';
+            div.innerHTML = `
+                <input type="checkbox" value="${c.id}" id="chk_${c.id}" style="width:18px; height:18px;">
+                <img src="${c.avatar}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;">
+                <label for="chk_${c.id}" style="flex:1; cursor:pointer; font-size:14px;">${c.name}</label>
+            `;
+            list.appendChild(div);
+        });
     }
-
-    state.contacts.forEach(c => {
-        const item = document.createElement('div');
-        item.style = "display:flex; align-items:center; gap:10px; margin-bottom:8px; background:rgba(255,255,255,0.05); padding:8px; border-radius:10px;";
-        item.innerHTML = `
-            <input type="checkbox" value="${c.id}" id="chk_${c.id}" style="width:18px; height:18px;">
-            <img src="${c.avatar}" style="width:30px; height:30px; border-radius:50%;">
-            <label for="chk_${c.id}" style="flex:1; cursor:pointer;">${c.name}</label>
-        `;
-        list.appendChild(item);
-    });
     
-    UI.openModal('modalCreateGroup');
+    openModal('modalCreateGroup');
 }
 
-// === 8. НАСТРОЙКИ ПРОФИЛЯ ===
 
-function openSettings() {
-    document.getElementById('setMyName').value = state.user.name;
-    document.getElementById('setMyAvatar').value = state.user.avatar;
-    UI.openModal('modalSettings');
+async function finishCreateGroup() {
+    const name = document.getElementById('newGroupName').value.trim();
+    if(!name) return showToast('Назовите группу!');
+    
+    const checkboxes = document.querySelectorAll('#groupUserList input[type="checkbox"]:checked');
+    const checkedIds = Array.from(checkboxes).map(cb => cb.value);
+    
+    const manualInput = document.getElementById('manualIds').value.trim();
+    let finalUids = [...checkedIds];
+
+    try {
+        if (manualInput) {
+            const manualIds = manualInput.split(',').map(id => id.trim().toLowerCase()).filter(id => id);
+            // Ищем UID по коротким ID в базе
+            const usersSnap = await db.collection("users").where("shortId", "in", manualIds).get();
+            usersSnap.forEach(doc => finalUids.push(doc.data().id));
+        }
+
+        const members = [...new Set([state.profile.id, ...finalUids])];
+        if (members.length < 2) return showToast("Нужен хотя бы один участник кроме вас");
+
+        await db.collection("groups").add({
+            name: name,
+            members: members,
+            admin: state.profile.id,
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&color=fff`,
+            createdAt: Date.now()
+        });
+
+        showToast('Группа создана!');
+        closeModals();
+        // Очистка полей
+        document.getElementById('newGroupName').value = '';
+        document.getElementById('manualIds').value = '';
+    } catch(e) {
+        showToast('Ошибка. Проверьте правильность ID');
+    }
 }
 
-async function saveSettings() {
-    const newName = val('setMyName').trim();
-    const newAvatar = val('setMyAvatar').trim();
 
-    if (!newName) return UI.toast('Имя не может быть пустым');
+// === АВТОРИЗАЦИЯ ===
+async function handleAuth() {
+    const email = document.getElementById('setupEmail').value.trim();
+    const password = document.getElementById('setupPassword').value.trim();
+    const shortId = document.getElementById('setupShortId').value.trim().toLowerCase();
+    const name = document.getElementById('setupName').value.trim();
+    const avatar = document.getElementById('setupAvatar').value;
 
-    await db.collection('users').doc(state.user.id).update({
-        name: newName,
-        avatar: newAvatar
-    });
+    if (!email || !password) return showToast('Введите Email и Пароль');
 
-    state.user.name = newName;
-    state.user.avatar = newAvatar;
-    updateHeaderUI();
-    UI.closeModals();
-    UI.toast('Профиль обновлен');
+    try {
+        await auth.signInWithEmailAndPassword(email, password);
+        showToast("Вход выполнен!");
+    } catch (loginError) {
+        if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-credential') {
+            if (!shortId || !name) return showToast('Для регистрации нужны ID и Имя');
+            // Проверка ID (теперь разрешена правилами)
+            const idCheck = await db.collection("users").where("shortId", "==", shortId).get();
+            if (!idCheck.empty) return showToast('Этот ID уже занят');
+
+            const newUser = await auth.createUserWithEmailAndPassword(email, password);
+            const profileData = {
+                id: newUser.user.uid,
+                shortId, name, email,
+                avatar: avatar || `https://ui-avatars.com/api/?name=${name}`,
+                createdAt: Date.now()
+            };
+            await db.collection("users").doc(newUser.user.uid).set(profileData);
+            state.profile = profileData;
+            showToast("Аккаунт создан!");
+            closeModals();
+        } else {
+            showToast("Ошибка: " + loginError.message);
+        }
+    }
 }
 
-async function logout() {
-    if (confirm('Выйти из аккаунта?')) {
-        await auth.signOut();
+function logout() {
+    if(confirm('Выйти?')) {
+        auth.signOut();
+        localStorage.clear();
         location.reload();
     }
 }
 
-// === 9. ОПЦИИ КОНТАКТА И УДАЛЕНИЕ ===
-
-function openContactOptions(id) {
-    if (!id) return;
-    const data = state.chatType === 'group' 
-        ? state.groups.find(g => g.id === id) 
-        : state.contacts.find(c => c.id === id);
-    
-    if (!data) return;
-    document.getElementById('optName').innerText = data.name;
-    UI.openModal('modalOptions');
+// === ЧАТ ===
+function getChatId(user1, user2) {
+    return [user1, user2].sort().join('_');
 }
-function closeChat() {
-    const sidebar = document.getElementById('sidebar');
-    const chatArea = document.getElementById('chatArea');
+
+function loadChat(targetId, type = 'user') {
+    activeChat = targetId;
+    activeChatType = type;
     
-    if (sidebar) sidebar.classList.remove('hidden');
-    if (chatArea) chatArea.classList.remove('active');
+    // 1. Сразу чистим экран, чтобы не видеть сообщения из прошлого чата
+    const list = document.getElementById('messages');
+    list.innerHTML = '<div style="text-align:center; padding:20px; opacity:0.5;">Загрузка...</div>';
     
-    state.activeChat = null;
-    if (state.listeners.chat) {
-        state.listeners.chat();
-        state.listeners.chat = null;
+    // UI переключение
+    document.getElementById('chatWrap').classList.add('active');
+    document.getElementById('sidebar').classList.add('hidden');
+    
+    let name, avatar;
+    
+    if (type === 'group') {
+        const grp = state.groups.find(g => g.id === targetId);
+        name = grp ? grp.name : 'Группа';
+        avatar = grp ? grp.avatar : '';
+        document.getElementById('chatStatus').innerText = `${grp ? grp.members.length : 0} участников`;
+    } else {
+        const usr = state.contacts.find(c => c.id === targetId);
+        name = usr ? usr.name : 'User';
+        avatar = usr ? usr.avatar : '';
+        document.getElementById('chatStatus').innerText = 'В сети';
     }
-}
-async function deleteContactFromOptions() {
-    if (!confirm('Удалить этот чат из списка контактов? История сообщений не удалится.')) return;
 
-    try {
-        if (state.chatType === 'user') {
-            await db.collection('users').doc(state.user.id).update({
-                contacts: firebase.firestore.FieldValue.arrayRemove(state.activeChat)
-            });
-            state.user.contacts = state.user.contacts.filter(id => id !== state.activeChat);
-            await loadContacts();
-        } else {
-            // Если это группа — просто выходим из неё
-            await db.collection('groups').doc(state.activeChat).update({
-                members: firebase.firestore.FieldValue.arrayRemove(state.user.id)
-            });
+    document.getElementById('chatName').innerText = name;
+    document.getElementById('chatAvatar').src = avatar;
+    
+    // 2. Отписываемся от старого чата перед созданием нового слушателя
+    if (currentUnsubscribe) {
+        currentUnsubscribe();
+        currentUnsubscribe = null;
+    }
+
+    // 3. Формируем чистый запрос
+    let msgQuery = db.collection("messages");
+
+    if (type === 'group') {
+        // Ищем ТОЛЬКО по groupId
+        msgQuery = msgQuery.where("groupId", "==", targetId);
+    } else {
+        // Ищем ТОЛЬКО по chatId (личка)
+        const combinedId = getChatId(state.profile.id, targetId);
+        msgQuery = msgQuery.where("chatId", "==", combinedId);
+    }
+
+    // Добавляем сортировку по времени
+    msgQuery = msgQuery.orderBy("time", "asc");
+
+    currentUnsubscribe = msgQuery.onSnapshot((snapshot) => {
+        const msgs = [];
+        snapshot.forEach(doc => {
+            msgs.push({ id: doc.id, ...doc.data() });
+        });
+        renderMessages(msgs);
+    }, (error) => {
+        console.error("Ошибка Firestore:", error);
+        if (error.code === 'failed-precondition') {
+            showToast("Нужно создать индексы в консоли Firebase");
         }
-        closeChat();
-        UI.closeModals();
-        UI.toast('Удалено');
-    } catch (e) {
-        UI.toast('Ошибка удаления');
-    }
+    });
 }
 
-// Переключение шагов создания группы
-function groupNextStep(step) {
-    const s1 = document.getElementById('groupStep1');
-    const s2 = document.getElementById('groupStep2');
-    
-    if (step === 2) {
-        if (!val('newGroupName').trim()) return UI.toast('Введите название группы');
-        s1.style.display = 'none';
-        s2.style.display = 'block';
-        renderGroupContactList(); // Показываем список друзей при переходе
-    } else {
-        s1.style.display = 'block';
-        s2.style.display = 'none';
-    }
-}
 
-// Поиск пользователя в базе по его shortId
-async function searchUserForGroup(query) {
-    const resDiv = document.getElementById('searchResult');
-    query = query.trim().toLowerCase();
+function renderMessages(msgs) {
+    const list = document.getElementById('messages');
+    list.innerHTML = '';
     
-    if (query.length < 3) {
-        resDiv.innerHTML = '';
-        return;
-    }
+    msgs.forEach(m => {
+        const isMine = m.sender === state.profile.id;
+        let content = '';
+        let extraClass = '';
+        
+        if (m.type === 'text') content = m.content.replace(/\n/g, '<br>');
+        else if (m.type === 'image') content = `<img src="${m.content}" onclick="viewFullScreen(this.src)">`;
+        else if (m.type === 'audio') content = `<audio controls src="${m.content}"></audio>`;
+        else if (m.type === 'video_note') {
+            extraClass = 'has-circle';
+            content = `<video class="circle-msg" src="${m.content}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
+        }
+        else if (m.type === 'video') content = `<video src="${m.content}" controls style="max-width:100%; border-radius:12px;"></video>`;
 
-    // Ищем в Firebase по полю shortId
-    const snap = await db.collection('users').where('shortId', '==', query).get();
-    
-    if (snap.empty) {
-        resDiv.innerHTML = '<div style="font-size:12px; opacity:0.5; padding:5px;">Пользователь не найден</div>';
-    } else {
-        const u = snap.docs[0].data();
-        if (u.id === state.user.id) return; // Себя не ищем
+        const div = document.createElement('div');
+        div.className = `msg ${isMine ? 'out' : 'in'} ${extraClass}`;
+        
+        // Показываем имя отправителя в группе, если это не я
+        let senderLabel = '';
+        if(activeChatType === 'group' && !isMine) {
+            senderLabel = `<div style="font-size:10px; color:var(--blue); margin-bottom:2px;">${m.senderName || 'User'}</div>`;
+        }
 
-        resDiv.innerHTML = `
-            <div class="contact" style="background:rgba(255,255,255,0.1); border-radius:12px; padding:8px; display:flex; align-items:center; gap:10px; cursor:pointer;" onclick="addFoundToGroupList('${u.id}', '${u.name}', '${u.avatar}')">
-                <img src="${u.avatar}" class="avatar" style="width:30px; height:30px;">
-                <div style="flex:1">
-                    <div style="font-size:13px; font-weight:600;">${u.name}</div>
-                    <div style="font-size:11px; opacity:0.6;">@${u.shortId}</div>
-                </div>
-                <i class="fas fa-plus-circle" style="color:var(--accent)"></i>
+        div.innerHTML = `
+            ${senderLabel}
+            ${content}
+            <div class="msg-meta">
+                ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
             </div>
         `;
+        
+        if (isMine) {
+            div.oncontextmenu = (e) => { e.preventDefault(); if(confirm('Удалить?')) deleteMessage(m.id); };
+        }
+        list.appendChild(div);
+    });
+    setTimeout(() => list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' }), 100);
+}
+
+async function sendMsg(payload = null) {
+    if(!activeChat) return;
+    const textInput = document.getElementById('msgInput');
+    const text = textInput.value.trim();
+    if(!text && !payload) return;
+
+    // Базовый объект сообщения
+    const msgData = {
+        sender: state.profile.id,
+        senderName: state.profile.name,
+        content: payload ? payload.content : text,
+        type: payload ? payload.type : 'text',
+        time: Date.now()
+    };
+
+    // Разделяем: либо chatId (личка), либо groupId (группа)
+    if (activeChatType === 'group') {
+        msgData.groupId = activeChat;
+        // Убеждаемся, что chatId не попадет в базу
+        if (msgData.chatId) delete msgData.chatId;
+    } else {
+        msgData.chatId = getChatId(state.profile.id, activeChat);
+        // Убеждаемся, что groupId не попадет в базу
+        if (msgData.groupId) delete msgData.groupId;
+    }
+
+    try {
+        await db.collection("messages").add(msgData);
+        textInput.value = '';
+        autoResize(textInput);
+    } catch (e) {
+        console.error("Ошибка при отправке:", e);
+        showToast("Ошибка отправки. Проверьте консоль.");
     }
 }
 
-// Добавляет найденного юзера в список выбора сверху
-function addFoundToGroupList(id, name, avatar) {
-    const list = document.getElementById('groupUserList');
-    if (document.getElementById(`chk_${id}`)) return UI.toast('Уже добавлен');
-
-    const div = document.createElement('div');
-    div.style = "display:flex; align-items:center; gap:10px; padding:8px; border-bottom:1px solid var(--border);";
-    div.innerHTML = `
-        <input type="checkbox" value="${id}" id="chk_${id}" checked style="width:18px; height:18px;">
-        <img src="${avatar}" style="width:30px; height:30px; border-radius:50%;">
-        <label for="chk_${id}" style="flex:1; cursor:pointer; font-size:14px;">${name}</label>
-    `;
-    list.prepend(div);
-    document.getElementById('groupUserSearch').value = '';
-    document.getElementById('searchResult').innerHTML = '';
+async function deleteMessage(msgId) {
+    try { await db.collection("messages").doc(msgId).delete(); } catch(e){}
 }
 
-// Загрузка твоих текущих друзей в список участников
-function renderGroupContactList() {
-    const list = document.getElementById('groupUserList');
-    // Сохраняем уже отмеченных, чтобы не сбросить при рендере
-    const selected = Array.from(document.querySelectorAll('#groupUserList input:checked')).map(i => i.value);
+// === СПИСОК КОНТАКТОВ И ГРУПП ===
+function renderContactList() {
+    const list = document.getElementById('contactList');
     list.innerHTML = '';
+    
+    // 1. Сначала рисуем ГРУППЫ
+    state.groups.forEach(g => {
+        const div = document.createElement('div');
+        div.className = `contact ${activeChat === g.id ? 'active' : ''}`;
+        div.innerHTML = `
+            <img src="${g.avatar}" class="avatar">
+            <div class="contact-info" onclick="loadChat('${g.id}', 'group')">
+                <div class="contact-name"><i class="fas fa-users" style="font-size:12px; margin-right:5px; color:var(--blue)"></i> ${g.name}</div>
+                <div class="contact-last">Группа</div>
+            </div>
+        `;
+        list.appendChild(div);
+    });
 
+    // 2. Потом контакты
     state.contacts.forEach(c => {
         const div = document.createElement('div');
-        div.style = "display:flex; align-items:center; gap:10px; padding:8px; border-bottom:1px solid var(--border);";
+        div.className = `contact ${activeChat === c.id ? 'active' : ''}`;
         div.innerHTML = `
-            <input type="checkbox" value="${c.id}" id="chk_${c.id}" ${selected.includes(c.id) ? 'checked' : ''} style="width:18px; height:18px;">
-            <img src="${c.avatar}" style="width:30px; height:30px; border-radius:50%;">
-            <label for="chk_${c.id}" style="flex:1; cursor:pointer; font-size:14px;">${c.name}</label>
+            <img src="${c.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${c.avatar}')">
+            <div class="contact-info" onclick="loadChat('${c.id}', 'user')">
+                <div class="contact-name">${c.name}</div>
+                <div class="contact-last">@${c.shortId}</div>
+            </div>
+            <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${c.id}')"><i class="fas fa-ellipsis-v"></i></div>
         `;
         list.appendChild(div);
     });
 }
 
-// Финальная сборка группы
-async function finishCreateGroup() {
-    const name = val('newGroupName').trim();
-    const avatar = document.getElementById('newGroupPreview').src;
+// === ДОБАВЛЕНИЕ КОНТАКТА ===
+async function addContact() {
+    const searchShortId = document.getElementById('addId').value.trim().toLowerCase();
+    if(!searchShortId) return;
+    if(searchShortId === state.profile.shortId) return showToast('Это ваш ID');
     
-    // Собираем ID из чекбоксов
-    const checkboxes = document.querySelectorAll('#groupUserList input[type="checkbox"]:checked');
-    let members = Array.from(checkboxes).map(cb => cb.value);
-    
-    // Добавляем ID из ручного ввода (через запятую)
-    const manual = val('manualIds').trim();
-    if (manual) {
-        const manualArray = manual.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
-        // Тут можно добавить проверку в базе, но для скорости добавим "как есть" или через поиск
-        const snap = await db.collection('users').where('shortId', 'in', manualArray).get();
-        snap.forEach(doc => members.push(doc.id));
+    const query = await db.collection("users").where("shortId", "==", searchShortId).get();
+    if(!query.empty) {
+        const userData = query.docs[0].data();
+        if(!state.contacts.find(c => c.id === userData.id)) {
+            state.contacts.push(userData);
+            localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts));
+            renderContactList();
+        }
+        closeModals();
+        loadChat(userData.id, 'user');
+    } else {
+        showToast("Не найден");
     }
+}
 
-    members = [...new Set([state.user.id, ...members])]; // Убираем дубли и добавляем себя
-
-    if (members.length < 2) return UI.toast('Нужно минимум 2 участника');
-
+// === МЕДИА ===
+async function toggleRecord(mode) {
+    if(mediaRecorder) { mediaRecorder.stop(); return; }
     try {
-        await db.collection('groups').add({
-            name,
-            avatar,
-            admin: state.user.id,
-            members,
-            createdAt: Date.now(),
-            lastMsgTime: Date.now()
-        });
-        UI.toast('Группа создана!');
-        UI.closeModals();
-        // Сброс полей
-        document.getElementById('newGroupName').value = '';
-        document.getElementById('manualIds').value = '';
-    } catch (e) {
-        UI.toast('Ошибка создания');
-    }
+        const constraints = mode === 'video_note' ? { audio: true, video: { facingMode: "user", aspectRatio: 1 } } : { audio: true };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        mediaRecorder = new MediaRecorder(stream);
+        recordedChunks = [];
+        mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: mode === 'video_note' ? 'video/webm' : 'audio/webm' });
+            const reader = new FileReader();
+            reader.onload = () => sendMsg({ type: mode, content: reader.result });
+            reader.readAsDataURL(blob);
+            stream.getTracks().forEach(t => t.stop());
+            mediaRecorder = null;
+            document.getElementById(mode === 'video_note' ? 'videoBtn' : 'voiceBtn').classList.remove('rec');
+        };
+        mediaRecorder.start();
+        document.getElementById(mode === 'video_note' ? 'videoBtn' : 'voiceBtn').classList.add('rec');
+    } catch(e) { showToast('Нет доступа к микро/камере'); }
 }
 
-
-function viewAvatarFromOptions() {
-    const avatarImg = document.getElementById('chatAvatar').src;
-    viewFullScreen(avatarImg);
-    UI.closeModals();
+function sendFile(input) {
+    const file = input.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = e => sendMsg({ type: file.type.startsWith('video') ? 'video' : 'image', content: e.target.result });
+    reader.readAsDataURL(file);
 }
 
+// === UI UTILS ===
+function updateSelfUI() {
+    document.getElementById('myNameDisplay').innerText = state.profile.name;
+    document.getElementById('myIdDisplay').innerText = '@' + state.profile.shortId;
+    document.getElementById('myAvatarDisplay').src = state.profile.avatar;
+    document.getElementById('setMyName').value = state.profile.name;
+    document.getElementById('setMyAvatar').value = state.profile.avatar;
+}
+function saveSettings() {
+    state.profile.name = document.getElementById('setMyName').value;
+    state.profile.avatar = document.getElementById('setMyAvatar').value;
+    db.collection("users").doc(state.profile.id).set(state.profile, {merge:true});
+    updateSelfUI(); closeModals();
+}
+function checkUrlParams() {
+    const p = new URLSearchParams(window.location.search);
+    const chat = p.get('chat');
+    if(chat) { /* Логика диплинка */ }
+}
+function toggleFabMenu() { document.getElementById('fabMenu').classList.toggle('open'); }
+function setRandomAvatar(inId, imgId) { const u = `https://picsum.photos/id/${Math.floor(Math.random()*1000)}/200`; document.getElementById(inId).value=u; if(imgId)document.getElementById(imgId).src=u; }
+function updatePreview(id, v) { document.getElementById(id).src = v || 'https://ui-avatars.com/api/?name=?'; }
+function openSettings() { openModal('modalSettings'); }
+function openContactOptions(id) { if(!id || activeChatType==='group')return; optionsTargetId=id; openModal('modalOptions'); }
+function deleteContactFromOptions() { 
+    state.contacts = state.contacts.filter(c => c.id !== optionsTargetId); 
+    localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts)); 
+    closeChat(); closeModals(); 
+}
+function viewAvatarFromOptions() { 
+    const c = state.contacts.find(x => x.id === optionsTargetId); 
+    if(c) viewFullScreen(c.avatar); closeModals(); 
+}
+function viewFullScreen(src) { document.getElementById('lightboxImg').src=src; document.getElementById('lightbox').classList.add('open'); document.getElementById('lightbox').style.display='flex'; }
+function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); setTimeout(()=>document.getElementById('lightbox').style.display='none',300); }
+function autoResize(el) { el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
+function openModal(id) { document.getElementById(id).style.display='flex'; setTimeout(()=>document.getElementById(id).classList.add('open'),10); }
+function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m=>{ m.classList.remove('open'); setTimeout(()=>m.style.display='none',300); }); }
+function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
+function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,2500); }
+function copyMyId() { navigator.clipboard.writeText(state.profile.shortId); showToast('ID скопирован'); }
+
+document.querySelectorAll('.modal-overlay').forEach(el => { el.addEventListener('click', e => { if(e.target===el && el.id!=='modalWelcome') closeModals(); }); });
