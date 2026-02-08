@@ -60,9 +60,7 @@ window.onload = () => {
         }
     });
 };
-// Переменные для отписки
-let groupsUnsubscribe = null;
-let chatsUnsubscribe = null;
+// Переменные для 
 
 function listenToData(myUid) {
     // 1. Слушаем ГРУППЫ
