@@ -43,7 +43,7 @@ window.onload = () => {
                     
                     // 2. Слушаем группы, где я участник
                     listenToData(user.uid);
-                    
+                    initPush(user.uid); 
                     // 3. Рендерим контакты(убрал как ты и сказал)
                     
                     closeModals();
@@ -65,48 +65,48 @@ window.onload = () => {
 // Переменные для 
 
 function listenToData(myUid) {
-    // 1. Слушаем ГРУППЫ
+    // 1. Слушаем ГРУППЫ (оставляем как было)
     if(groupsUnsubscribe) groupsUnsubscribe();
     groupsUnsubscribe = db.collection("groups")
         .where("members", "array-contains", myUid)
         .onSnapshot(snapshot => {
-            state.groups = [];
-            snapshot.forEach(doc => {
-                state.groups.push({ id: doc.id, ...doc.data(), type: 'group' });
-            });
+            state.groups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), type: 'group' }));
             renderContactList();
         });
 
-    // 2. Слушаем ЛИЧНЫЕ ЧАТЫ (Вместо LocalStorage)
+    // 2. Слушаем ЛИЧНЫЕ ЧАТЫ (теперь с живым обновлением профилей)
     if(chatsUnsubscribe) chatsUnsubscribe();
     chatsUnsubscribe = db.collection("chats")
         .where("members", "array-contains", myUid)
-        .onSnapshot(async (snapshot) => {
-            // Нам нужно получить данные собеседника для каждого чата
-            const contactsPromises = snapshot.docs.map(async doc => {
-                const data = doc.data();
-                // Находим ID собеседника (тот, который не мой)
-                const partnerId = data.members.find(id => id !== myUid);
-                
-                if (partnerId) {
-                    // Загружаем инфо о собеседнике из users
-                    const userDoc = await db.collection("users").doc(partnerId).get();
-                    if (userDoc.exists) {
-                        return userDoc.data();
-                    }
-                }
-                return null;
-            });
+        .onSnapshot(snapshot => {
+            const partnerIds = snapshot.docs.map(doc => {
+                return doc.data().members.find(id => id !== myUid);
+            }).filter(id => id);
 
-            // Ждем пока загрузятся все профили
-            const resolvedContacts = await Promise.all(contactsPromises);
-            
-            // Фильтруем пустые (если вдруг юзер удален) и обновляем state
-            state.contacts = resolvedContacts.filter(c => c !== null);
-            
-            renderContactList();
+            if (partnerIds.length === 0) {
+                state.contacts = [];
+                renderContactList();
+                return;
+            }
+
+            // Слушаем изменения во всех юзерах, с которыми есть чат
+            db.collection("users").where("id", "in", partnerIds)
+                .onSnapshot(userSnap => {
+                    state.contacts = userSnap.docs.map(d => d.data());
+                    renderContactList();
+                    
+                    // Если сейчас открыт чат с кем-то из них — обновляем статус сверху
+                    if (activeChat && activeChatType === 'user') {
+                        const currentPartner = state.contacts.find(c => c.id === activeChat);
+                        if (currentPartner) {
+                            const statusEl = document.getElementById('chatStatus');
+                            statusEl.innerText = "Был(а) в сети: " + formatLastSeen(currentPartner.lastSeen);
+                        }
+                    }
+                });
         });
 }
+
 
 
 function openCreateGroupModal() {
@@ -226,7 +226,20 @@ function logout() {
         location.reload();
     }
 }
+function formatLastSeen(timestamp) {
+    if (!timestamp) return "давно";
+    const now = Date.now();
+    const diff = now - timestamp;
 
+    if (diff < 60000) return "только что";
+    if (diff < 3600000) return Math.floor(diff / 60000) + " мин. назад";
+    
+    const date = new Date(timestamp);
+    if (diff < 86400000) {
+        return "сегодня в " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString();
+}
 // === ЧАТ ===
 function getChatId(user1, user2) {
     return [user1, user2].sort().join('_');
@@ -246,7 +259,7 @@ function loadChat(targetId, type = 'user') {
     
     let name, avatar;
     
-    if (type === 'group') {
+        if (type === 'group') {
         const grp = state.groups.find(g => g.id === targetId);
         name = grp ? grp.name : 'Группа';
         avatar = grp ? grp.avatar : '';
@@ -255,8 +268,24 @@ function loadChat(targetId, type = 'user') {
         const usr = state.contacts.find(c => c.id === targetId);
         name = usr ? usr.name : 'User';
         avatar = usr ? usr.avatar : '';
-        document.getElementById('chatStatus').innerText = 'В сети';
+        
+        // --- ОБНОВЛЕНИЕ ТУТ ---
+        const statusEl = document.getElementById('chatStatus');
+        if (usr && usr.lastSeen) {
+            const now = Date.now();
+            // Если был активен меньше 2 минут назад — пишем "В сети"
+            if (now - usr.lastSeen < 120000) { 
+                statusEl.innerText = 'В сети';
+                statusEl.style.color = '#00ff00'; // Можно подсветить зеленым
+            } else {
+                statusEl.innerText = "Был(а) в сети: " + formatLastSeen(usr.lastSeen);
+                statusEl.style.color = 'rgba(255,255,255,0.6)';
+            }
+        } else {
+            statusEl.innerText = 'Оффлайн';
+        }
     }
+
 
     document.getElementById('chatName').innerText = name;
     document.getElementById('chatAvatar').src = avatar;
@@ -389,28 +418,50 @@ function renderContactList() {
         div.innerHTML = `
             <img src="${g.avatar}" class="avatar">
             <div class="contact-info" onclick="loadChat('${g.id}', 'group')">
-                <div class="contact-name"><i class="fas fa-users" style="font-size:12px; margin-right:5px; color:var(--blue)"></i> ${g.name}</div>
-                <div class="contact-last">Группа</div>
+                <div class="contact-name">
+                    <i class="fas fa-users" style="font-size:12px; margin-right:5px; color:var(--blue)"></i> 
+                    ${g.name}
+                </div>
+                <div class="contact-last" style="opacity: 0.7;">Группа: ${g.members.length} участников</div>
             </div>
         `;
         list.appendChild(div);
     });
 
-    // 2. Потом контакты
+    // 2. Потом рисуем ЛИЧНЫЕ КОНТАКТЫ
     state.contacts.forEach(c => {
+        const isMine = c.id === state.profile.id;
+        if (isMine) return; // Не показываем самих себя в списке контактов
+
+        // Проверка статуса "В сети" (активность менее 2 минут назад)
+        const isOnline = c.lastSeen && (Date.now() - c.lastSeen) < 120000;
+        
+        let statusHtml;
+        if (isOnline) {
+            statusHtml = `<span style="color: #00ff00; font-weight: bold;">В сети</span>`;
+        } else {
+            statusHtml = `<span style="opacity: 0.6;">Был(а): ${formatLastSeen(c.lastSeen)}</span>`;
+        }
+
         const div = document.createElement('div');
         div.className = `contact ${activeChat === c.id ? 'active' : ''}`;
         div.innerHTML = `
-            <img src="${c.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${c.avatar}')">
+            <div style="position: relative;">
+                <img src="${c.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${c.avatar}')">
+                ${isOnline ? '<div style="position:absolute; bottom:2px; right:2px; width:12px; height:12px; background:#00ff00; border:2px solid var(--bg); border-radius:50%;"></div>' : ''}
+            </div>
             <div class="contact-info" onclick="loadChat('${c.id}', 'user')">
                 <div class="contact-name">${c.name}</div>
-                <div class="contact-last">@${c.shortId}</div>
+                <div class="contact-last">${statusHtml}</div>
             </div>
-            <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${c.id}')"><i class="fas fa-ellipsis-v"></i></div>
+            <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${c.id}')">
+                <i class="fas fa-ellipsis-v"></i>
+            </div>
         `;
         list.appendChild(div);
     });
 }
+
 
 // === ДОБАВЛЕНИЕ КОНТАКТА ===
 async function addContact() {
@@ -547,6 +598,30 @@ async function checkUrlParams() {
         } catch (e) { console.error(e); }
     }
 }
+const messaging = firebase.messaging();
+const VAPID_KEY = 'yTpqd1mewy_D9gxuByV8o4SwJqz38qSk8RLcZWJPgNs';
+
+// 2. Твоя функция (добавил параметр uid для надежности)
+// Добавь (uid) в скобки
+async function initPush(uid) { 
+    try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+            const token = await messaging.getToken({ vapidKey: VAPID_KEY });
+            
+            if (token) {
+                // Используем переданный uid, чтобы точно попасть в нужный документ
+                await db.collection("users").doc(uid).update({
+                    fcmToken: token
+                });
+                console.log("FCM Токен сохранен для:", uid);
+            }
+        }
+    } catch (err) {
+        console.error('Ошибка пушей:', err);
+    }
+}
+
 
 function toggleFabMenu() { document.getElementById('fabMenu').classList.toggle('open'); }
 function setRandomAvatar(inId, imgId) { const u = `https://picsum.photos/id/${Math.floor(Math.random()*1000)}/200`; document.getElementById(inId).value=u; if(imgId)document.getElementById(imgId).src=u; }
@@ -637,3 +712,24 @@ function showToast(m) { const t=document.getElementById('toast'); t.innerText=m;
 function copyMyId() { navigator.clipboard.writeText(state.profile.shortId); showToast('ID скопирован'); }
 
 document.querySelectorAll('.modal-overlay').forEach(el => { el.addEventListener('click', e => { if(e.target===el && el.id!=='modalWelcome') closeModals(); }); });
+// Каждую минуту отправляем в базу, что мы еще тут
+setInterval(() => {
+    if (state.profile.id) {
+        db.collection("users").doc(state.profile.id).update({
+            lastSeen: Date.now()
+        }).catch(() => {});
+    }
+}, 60000);
+
+// Каждую минуту обновляем текст в интерфейсе (чтобы "5 мин. назад" менялось на "6 мин. назад")
+setInterval(() => {
+    renderContactList();
+    if (activeChat && activeChatType === 'user') {
+        const currentPartner = state.contacts.find(c => c.id === activeChat);
+        if (currentPartner) {
+            const statusEl = document.getElementById('chatStatus');
+            const isOnline = (Date.now() - currentPartner.lastSeen) < 120000;
+            statusEl.innerText = isOnline ? 'В сети' : "Был(а) в сети: " + formatLastSeen(currentPartner.lastSeen);
+        }
+    }
+}, 60000);
