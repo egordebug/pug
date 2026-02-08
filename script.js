@@ -15,9 +15,10 @@ const auth = firebase.auth();
 // === СОСТОЯНИЕ ===
 let state = {
     profile: { name: '', id: '', shortId: '', avatar: '' },
-    contacts: JSON.parse(localStorage.getItem('nx3_contacts')) || [],
-    groups: [] // Сюда будем грузить группы из базы
+    contacts: [], // Теперь просто пустой массив, он заполнится из базы
+    groups: [] 
 };
+
 
 let activeChat = null; // ID юзера ИЛИ ID группы
 let activeChatType = null; // 'user' или 'group'
@@ -39,10 +40,9 @@ window.onload = () => {
                     updateSelfUI();
                     
                     // 2. Слушаем группы, где я участник
-                    listenToGroups(user.uid);
+                    listenToData(user.uid);
                     
-                    // 3. Рендерим контакты
-                    renderContactList();
+                    // 3. Рендерим контакты(убрал как ты и сказал)
                     
                     closeModals();
                     db.collection("users").doc(user.uid).update({ lastSeen: Date.now() }).catch(()=>{});
@@ -60,13 +60,13 @@ window.onload = () => {
         }
     });
 };
+// Переменные для отписки
+let groupsUnsubscribe = null;
+let chatsUnsubscribe = null;
 
-// === ГРУППЫ: Логика ===
-
-// Слушаем изменения в коллекциях групп, где есть мой ID
-function listenToGroups(myUid) {
+function listenToData(myUid) {
+    // 1. Слушаем ГРУППЫ
     if(groupsUnsubscribe) groupsUnsubscribe();
-    
     groupsUnsubscribe = db.collection("groups")
         .where("members", "array-contains", myUid)
         .onSnapshot(snapshot => {
@@ -76,7 +76,38 @@ function listenToGroups(myUid) {
             });
             renderContactList();
         });
+
+    // 2. Слушаем ЛИЧНЫЕ ЧАТЫ (Вместо LocalStorage)
+    if(chatsUnsubscribe) chatsUnsubscribe();
+    chatsUnsubscribe = db.collection("chats")
+        .where("members", "array-contains", myUid)
+        .onSnapshot(async (snapshot) => {
+            // Нам нужно получить данные собеседника для каждого чата
+            const contactsPromises = snapshot.docs.map(async doc => {
+                const data = doc.data();
+                // Находим ID собеседника (тот, который не мой)
+                const partnerId = data.members.find(id => id !== myUid);
+                
+                if (partnerId) {
+                    // Загружаем инфо о собеседнике из users
+                    const userDoc = await db.collection("users").doc(partnerId).get();
+                    if (userDoc.exists) {
+                        return userDoc.data();
+                    }
+                }
+                return null;
+            });
+
+            // Ждем пока загрузятся все профили
+            const resolvedContacts = await Promise.all(contactsPromises);
+            
+            // Фильтруем пустые (если вдруг юзер удален) и обновляем state
+            state.contacts = resolvedContacts.filter(c => c !== null);
+            
+            renderContactList();
+        });
 }
+
 
 function openCreateGroupModal() {
     const list = document.getElementById('groupUserList');
@@ -390,20 +421,34 @@ async function addContact() {
     if(!searchShortId) return;
     if(searchShortId === state.profile.shortId) return showToast('Это ваш ID');
     
-    const query = await db.collection("users").where("shortId", "==", searchShortId).get();
-    if(!query.empty) {
-        const userData = query.docs[0].data();
-        if(!state.contacts.find(c => c.id === userData.id)) {
-            state.contacts.push(userData);
-            localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts));
-            renderContactList();
+    try {
+        const query = await db.collection("users").where("shortId", "==", searchShortId).get();
+        if(!query.empty) {
+            const userData = query.docs[0].data();
+            const partnerId = userData.id;
+
+            // Генерируем ID чата (сортируем ID, чтобы он был одинаковым для обоих)
+            const chatId = getChatId(state.profile.id, partnerId);
+
+            // Создаем (или обновляем) запись о чате в базе данных
+            // Важно: записываем ID обоих участников в массив members
+            await db.collection("chats").doc(chatId).set({
+                type: 'private',
+                members: [state.profile.id, partnerId],
+                updatedAt: Date.now() 
+            }, { merge: true });
+
+            showToast("Контакт добавлен!");
+            closeModals();
+        } else {
+            showToast("Пользователь не найден");
         }
-        closeModals();
-        loadChat(userData.id, 'user');
-    } else {
-        showToast("Не найден");
+    } catch (e) {
+        console.error(e);
+        showToast("Ошибка при добавлении");
     }
 }
+
 
 // === МЕДИА ===
 async function toggleRecord(mode) {
@@ -435,6 +480,35 @@ function sendFile(input) {
     reader.onload = e => sendMsg({ type: file.type.startsWith('video') ? 'video' : 'image', content: e.target.result });
     reader.readAsDataURL(file);
 }
+async function inviteToGroup() {
+    // Проверяем, что мы вообще в группе
+    if (activeChatType !== 'group') return;
+
+    const shortId = prompt("Введите короткий ID пользователя (например, max2024):");
+    if (!shortId) return;
+
+    try {
+        // 1. Ищем пользователя в коллекции users
+        const userQuery = await db.collection("users").where("shortId", "==", shortId.toLowerCase().trim()).get();
+        
+        if (userQuery.empty) {
+            return showToast("Пользователь с таким ID не найден");
+        }
+
+        const newUser = userQuery.docs[0].data();
+        const newUserId = newUser.id;
+
+        // 2. Обновляем документ группы в Firestore
+        await db.collection("groups").doc(activeChat).update({
+            members: firebase.firestore.FieldValue.arrayUnion(newUserId)
+        });
+
+        showToast(`${newUser.name} добавлен в группу!`);
+    } catch (e) {
+        console.error("Ошибка при добавлении:", e);
+        showToast("Не удалось добавить участника. Возможно, у вас нет прав.");
+    }
+}
 
 // === UI UTILS ===
 function updateSelfUI() {
@@ -459,7 +533,39 @@ function toggleFabMenu() { document.getElementById('fabMenu').classList.toggle('
 function setRandomAvatar(inId, imgId) { const u = `https://picsum.photos/id/${Math.floor(Math.random()*1000)}/200`; document.getElementById(inId).value=u; if(imgId)document.getElementById(imgId).src=u; }
 function updatePreview(id, v) { document.getElementById(id).src = v || 'https://ui-avatars.com/api/?name=?'; }
 function openSettings() { openModal('modalSettings'); }
-function openContactOptions(id) { if(!id || activeChatType==='group')return; optionsTargetId=id; openModal('modalOptions'); }
+function openContactOptions(id) {
+    if(!id) return;
+    optionsTargetId = id;
+    
+    const optName = document.getElementById('optName');
+    const modal = document.getElementById('modalOptions');
+    
+    // Очищаем старые кнопки "добавить", если они были (чтобы не дублировались)
+    const oldBtn = document.getElementById('tempAddBtn');
+    if(oldBtn) oldBtn.remove();
+
+    if (activeChatType === 'group') {
+        const grp = state.groups.find(g => g.id === id);
+        optName.innerText = grp ? grp.name : 'Настройки группы';
+        
+        // Создаем кнопку "Добавить участника" динамически
+        const addBtn = document.createElement('button');
+        addBtn.id = 'tempAddBtn';
+        addBtn.className = 'modal-btn primary';
+        addBtn.style.marginBottom = '10px';
+        addBtn.innerText = '➕ Добавить участника';
+        addBtn.onclick = () => { closeModals(); inviteToGroup(); };
+        
+        // Вставляем кнопку перед кнопкой "Отмена"
+        modal.querySelector('.modal').insertBefore(addBtn, modal.querySelector('.modal-btn.sec'));
+    } else {
+        const c = state.contacts.find(x => x.id === id);
+        optName.innerText = c ? c.name : 'Опции';
+    }
+    
+    openModal('modalOptions');
+}
+
 function deleteContactFromOptions() { 
     state.contacts = state.contacts.filter(c => c.id !== optionsTargetId); 
     localStorage.setItem('nx3_contacts', JSON.stringify(state.contacts)); 
