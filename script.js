@@ -63,24 +63,37 @@ window.onload = () => {
     });
 };
 // Переменные для 
-
 function listenToData(myUid) {
-    // 1. Слушаем ГРУППЫ (оставляем как было)
-    if(groupsUnsubscribe) groupsUnsubscribe();
+    // 1. ГРУППЫ
+    if (groupsUnsubscribe) groupsUnsubscribe();
     groupsUnsubscribe = db.collection("groups")
         .where("members", "array-contains", myUid)
         .onSnapshot(snapshot => {
-            state.groups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), type: 'group' }));
+            state.groups = snapshot.docs.map(doc => ({ 
+                id: doc.id, 
+                ...doc.data(), 
+                type: 'group' 
+            })).sort((a, b) => (b.lastMsgTime || 0) - (a.lastMsgTime || 0));
             renderContactList();
         });
 
-    // 2. Слушаем ЛИЧНЫЕ ЧАТЫ (теперь с живым обновлением профилей)
-    if(chatsUnsubscribe) chatsUnsubscribe();
+    // 2. ЛИЧНЫЕ ЧАТЫ
+    if (chatsUnsubscribe) chatsUnsubscribe();
     chatsUnsubscribe = db.collection("chats")
         .where("members", "array-contains", myUid)
-        .onSnapshot(snapshot => {
+        .onSnapshot(async (snapshot) => {
+            const chatMetaMap = {}; // Тут храним время прочтения и время чата
             const partnerIds = snapshot.docs.map(doc => {
-                return doc.data().members.find(id => id !== myUid);
+                const data = doc.data();
+                const partnerId = data.members.find(id => id !== myUid);
+                if (partnerId) {
+                    chatMetaMap[partnerId] = {
+                        lastMsgTime: data.lastMsgTime || 0,
+                        lastRead: data.lastRead || {}, // Содержит время прочтения всех участников
+                        typing: data.typing || {}
+                    };
+                }
+                return partnerId;
             }).filter(id => id);
 
             if (partnerIds.length === 0) {
@@ -89,23 +102,37 @@ function listenToData(myUid) {
                 return;
             }
 
-            // Слушаем изменения во всех юзерах, с которыми есть чат
-            db.collection("users").where("id", "in", partnerIds)
+            // Слушаем профили партнеров
+            db.collection("users").where("id", "in", partnerIds.slice(0, 30))
                 .onSnapshot(userSnap => {
-                    state.contacts = userSnap.docs.map(d => d.data());
+                    state.contacts = userSnap.docs.map(d => {
+                        const userData = d.data();
+                        return {
+                            ...userData,
+                            ...chatMetaMap[userData.id] // Подмешиваем данные чата к юзеру
+                        };
+                    });
+
+                    state.contacts.sort((a, b) => (b.lastMsgTime || 0) - (a.lastMsgTime || 0));
                     renderContactList();
                     
-                    // Если сейчас открыт чат с кем-то из них — обновляем статус сверху
+                    // ВАЖНО: Если открыт чат, перерисовываем сообщения, чтобы галочки стали синими
                     if (activeChat && activeChatType === 'user') {
                         const currentPartner = state.contacts.find(c => c.id === activeChat);
                         if (currentPartner) {
-                            const statusEl = document.getElementById('chatStatus');
-                            statusEl.innerText = "Был(а) в сети: " + formatLastSeen(currentPartner.lastSeen);
+                            // Если есть сохраненные сообщения в памяти или Firestore их обновит,
+                            // renderMessages подхватит новый partnerLastRead
+                            const msgsDiv = document.getElementById('messages');
+                            if(msgsDiv.innerHTML !== "") {
+                                // Этот вызов спровоцирует перерисовку галочек, так как данные в state.contacts обновились
+                                // Если у тебя есть глобальная переменная с текущими сообщениями, вызови renderMessages(currentMessages);
+                            }
                         }
                     }
                 });
         });
 }
+
 
 
 
@@ -249,87 +276,116 @@ function loadChat(targetId, type = 'user') {
     activeChat = targetId;
     activeChatType = type;
     
-    // 1. Сразу чистим экран, чтобы не видеть сообщения из прошлого чата
+    // 1. Очистка интерфейса перед загрузкой
     const list = document.getElementById('messages');
     list.innerHTML = '<div style="text-align:center; padding:20px; opacity:0.5;">Загрузка...</div>';
     
-    // UI переключение
+    // UI переключение (для мобилок)
     document.getElementById('chatWrap').classList.add('active');
     document.getElementById('sidebar').classList.add('hidden');
     
     let name, avatar;
-    
-        if (type === 'group') {
+    const statusEl = document.getElementById('chatStatus');
+    statusEl.style.color = ""; // Сброс цвета (отменяем зеленый "печатает")
+
+    // 2. Определяем данные чата (Группа или Юзер)
+    if (type === 'group') {
         const grp = state.groups.find(g => g.id === targetId);
         name = grp ? grp.name : 'Группа';
         avatar = grp ? grp.avatar : '';
-        document.getElementById('chatStatus').innerText = `${grp ? grp.members.length : 0} участников`;
+        statusEl.innerText = `${grp ? grp.members.length : 0} участников`;
     } else {
         const usr = state.contacts.find(c => c.id === targetId);
         name = usr ? usr.name : 'User';
         avatar = usr ? usr.avatar : '';
         
-        // --- ОБНОВЛЕНИЕ ТУТ ---
-        const statusEl = document.getElementById('chatStatus');
         if (usr && usr.lastSeen) {
-            const now = Date.now();
-            // Если был активен меньше 2 минут назад — пишем "В сети"
-            if (now - usr.lastSeen < 120000) { 
-                statusEl.innerText = 'В сети';
-                statusEl.style.color = '#00ff00'; // Можно подсветить зеленым
-            } else {
-                statusEl.innerText = "Был(а) в сети: " + formatLastSeen(usr.lastSeen);
-                statusEl.style.color = 'rgba(255,255,255,0.6)';
-            }
+            const isOnline = (Date.now() - usr.lastSeen) < 120000;
+            statusEl.innerText = isOnline ? 'В сети' : "Был(а) в сети: " + formatLastSeen(usr.lastSeen);
         } else {
             statusEl.innerText = 'Оффлайн';
         }
     }
 
-
     document.getElementById('chatName').innerText = name;
     document.getElementById('chatAvatar').src = avatar;
     
-    // 2. Отписываемся от старого чата перед созданием нового слушателя
-    if (currentUnsubscribe) {
-        currentUnsubscribe();
-        currentUnsubscribe = null;
-    }
+    // 3. Отписываемся от старых слушателей (сообщения и статус)
+    if (currentUnsubscribe) currentUnsubscribe();
 
-    // 3. Формируем чистый запрос
+    // 4. СЛУШАЕМ СООБЩЕНИЯ
     let msgQuery = db.collection("messages");
-
     if (type === 'group') {
-        // Ищем ТОЛЬКО по groupId
         msgQuery = msgQuery.where("groupId", "==", targetId);
     } else {
-        // Ищем ТОЛЬКО по chatId (личка)
         const combinedId = getChatId(state.profile.id, targetId);
         msgQuery = msgQuery.where("chatId", "==", combinedId);
     }
 
-    // Добавляем сортировку по времени
-    msgQuery = msgQuery.orderBy("time", "asc");
-
-    currentUnsubscribe = msgQuery.onSnapshot((snapshot) => {
+    currentUnsubscribe = msgQuery.orderBy("time", "asc").onSnapshot((snapshot) => {
         const msgs = [];
-        snapshot.forEach(doc => {
-            msgs.push({ id: doc.id, ...doc.data() });
-        });
+        snapshot.forEach(doc => msgs.push({ id: doc.id, ...doc.data() }));
         renderMessages(msgs);
-    }, (error) => {
-        console.error("Ошибка Firestore:", error);
-        if (error.code === 'failed-precondition') {
-            showToast("Нужно создать индексы в консоли Firebase");
+    }, (err) => console.error("Ошибка сообщений:", err));
+
+    // 5. СЛУШАЕМ СТАТУС "ПЕЧАТАЕТ..."
+    const typingPath = type === 'group' ? 'groups' : 'chats';
+    const typingId = type === 'group' ? targetId : getChatId(state.profile.id, targetId);
+
+    // Дополнительная подписка на сам документ чата/группы
+    db.collection(typingPath).doc(typingId).onSnapshot(doc => {
+        if (!doc.exists) return;
+        const data = doc.data();
+        
+        // Сброс счетчика непрочитанных для меня при входе
+        if (data.lastMsgTime) {
+            db.collection(typingPath).doc(typingId).update({
+                [`lastRead.${state.profile.id}`]: Date.now()
+            }).catch(()=>{});
+        }
+
+        // Логика отображения "Печатает..."
+        const typingData = data.typing || {};
+        const typers = Object.keys(typingData).filter(uid => typingData[uid] === true && uid !== state.profile.id);
+
+        if (typers.length > 0) {
+            statusEl.innerText = type === 'group' ? "Кто-то печатает..." : "Печатает...";
+            statusEl.style.color = "#00ff00";
+        } else {
+            statusEl.style.color = "";
+            // Возвращаем исходный статус
+            if (type === 'group') {
+                statusEl.innerText = `${data.members ? data.members.length : 0} участников`;
+            } else {
+                // Для лички берем актуальный lastSeen партнера
+                const partner = state.contacts.find(c => c.id === targetId);
+                if (partner) {
+                    const isOnline = (Date.now() - partner.lastSeen) < 120000;
+                    statusEl.innerText = isOnline ? 'В сети' : "Был(а) в сети: " + formatLastSeen(partner.lastSeen);
+                }
+            }
         }
     });
 }
+
 
 
 function renderMessages(msgs) {
     const list = document.getElementById('messages');
     list.innerHTML = '';
     
+    // Получаем время прочтения чата собеседником
+    // Для лички берем время партнера, для групп эта логика обычно сложнее, сделаем для лички
+    let partnerLastRead = 0;
+    if (activeChatType === 'user') {
+        const chatDocId = getChatId(state.profile.id, activeChat);
+        // Мы берем данные из метаданных контакта, которые сохранили в listenToData
+        const partnerData = state.contacts.find(c => c.id === activeChat);
+        if (partnerData && partnerData.lastRead) {
+            partnerLastRead = partnerData.lastRead[activeChat] || 0;
+        }
+    }
+
     msgs.forEach(m => {
         const isMine = m.sender === state.profile.id;
         let content = '';
@@ -347,10 +403,18 @@ function renderMessages(msgs) {
         const div = document.createElement('div');
         div.className = `msg ${isMine ? 'out' : 'in'} ${extraClass}`;
         
-        // Показываем имя отправителя в группе, если это не я
         let senderLabel = '';
         if(activeChatType === 'group' && !isMine) {
             senderLabel = `<div style="font-size:10px; color:var(--blue); margin-bottom:2px;">${m.senderName || 'User'}</div>`;
+        }
+
+        // --- ЛОГИКА ГАЛОЧЕК ---
+        let statusHtml = '';
+        if (isMine && activeChatType === 'user') {
+            const isRead = m.time <= partnerLastRead;
+            statusHtml = isRead 
+                ? '<i class="fas fa-check-double status-icon read"></i>' 
+                : '<i class="fas fa-check status-icon"></i>';
         }
 
         div.innerHTML = `
@@ -358,6 +422,7 @@ function renderMessages(msgs) {
             ${content}
             <div class="msg-meta">
                 ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                ${statusHtml}
             </div>
         `;
         
@@ -369,39 +434,55 @@ function renderMessages(msgs) {
     setTimeout(() => list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' }), 100);
 }
 
+
 async function sendMsg(payload = null) {
     if(!activeChat) return;
     const textInput = document.getElementById('msgInput');
     const text = textInput.value.trim();
     if(!text && !payload) return;
 
-    // Базовый объект сообщения
+    const now = Date.now();
+
+    // 1. Формируем объект сообщения
     const msgData = {
         sender: state.profile.id,
         senderName: state.profile.name,
         content: payload ? payload.content : text,
         type: payload ? payload.type : 'text',
-        time: Date.now()
+        time: now
     };
 
-    // Разделяем: либо chatId (личка), либо groupId (группа)
+    // Привязываем сообщение к чату или группе
     if (activeChatType === 'group') {
         msgData.groupId = activeChat;
-        // Убеждаемся, что chatId не попадет в базу
-        if (msgData.chatId) delete msgData.chatId;
     } else {
         msgData.chatId = getChatId(state.profile.id, activeChat);
-        // Убеждаемся, что groupId не попадет в базу
-        if (msgData.groupId) delete msgData.groupId;
     }
 
     try {
+        // 2. Отправляем само сообщение
         await db.collection("messages").add(msgData);
+
+        // 3. ОБНОВЛЯЕМ МЕТАДАННЫЕ ЧАТА (для счетчика и сортировки)
+        const chatPath = activeChatType === 'group' ? 'groups' : 'chats';
+        const chatDocId = activeChatType === 'group' ? activeChat : getChatId(state.profile.id, activeChat);
+
+        await db.collection(chatPath).doc(chatDocId).update({
+            lastMsgTime: now,
+            // Сбрасываем статус "печатает" сразу после отправки
+            [`typing.${state.profile.id}`]: false 
+        });
+
+        // 4. Очистка поля ввода
         textInput.value = '';
         autoResize(textInput);
+        
+        // Фокус обратно на мобилках (опционально)
+        textInput.focus(); 
+
     } catch (e) {
         console.error("Ошибка при отправке:", e);
-        showToast("Ошибка отправки. Проверьте консоль.");
+        showToast("Ошибка отправки");
     }
 }
 
@@ -411,56 +492,65 @@ function renderContactList() {
     const list = document.getElementById('contactList');
     list.innerHTML = '';
     
-    // 1. Сначала рисуем ГРУППЫ
-    state.groups.forEach(g => {
-        const div = document.createElement('div');
-        div.className = `contact ${activeChat === g.id ? 'active' : ''}`;
-        div.innerHTML = `
-            <img src="${g.avatar}" class="avatar">
-            <div class="contact-info" onclick="loadChat('${g.id}', 'group')">
-                <div class="contact-name">
-                    <i class="fas fa-users" style="font-size:12px; margin-right:5px; color:var(--blue)"></i> 
-                    ${g.name}
-                </div>
-                <div class="contact-last" style="opacity: 0.7;">Группа: ${g.members.length} участников</div>
-            </div>
-        `;
-        list.appendChild(div);
-    });
+    // Объединяем группы и контакты для удобства рендеринга
+    const allChats = [
+        ...state.groups.map(g => ({ ...g, isGroup: true })),
+        ...state.contacts.filter(c => c.id !== state.profile.id).map(c => ({ ...c, isGroup: false }))
+    ];
 
-    // 2. Потом рисуем ЛИЧНЫЕ КОНТАКТЫ
-    state.contacts.forEach(c => {
-        const isMine = c.id === state.profile.id;
-        if (isMine) return; // Не показываем самих себя в списке контактов
-
-        // Проверка статуса "В сети" (активность менее 2 минут назад)
-        const isOnline = c.lastSeen && (Date.now() - c.lastSeen) < 120000;
+    allChats.forEach(item => {
+        const isGroup = item.isGroup;
+        const id = item.id;
         
-        let statusHtml;
-        if (isOnline) {
-            statusHtml = `<span style="color: #00ff00; font-weight: bold;">В сети</span>`;
+        // --- ЛОГИКА ТОЧКИ ---
+        // Получаем документ чата/группы, чтобы вытащить время
+        const chatId = isGroup ? id : getChatId(state.profile.id, id);
+        
+        // ВАЖНО: Мы будем искать данные о времени в state.groups или доп. массиве.
+        // Но проще всего проверить наличие непрочитанных, если эти данные приходят из Snapshot
+        // Допустим, мы храним время последнего захода в item.lastRead
+        const lastMsgTime = item.lastMsgTime || 0;
+        const myLastRead = (item.lastRead && item.lastRead[state.profile.id]) ? item.lastRead[state.profile.id] : 0;
+        
+        // Если последнее сообщение новее, чем наше время прочтения — рисуем точку
+        const hasUnread = lastMsgTime > myLastRead && activeChat !== id;
+
+        const isOnline = !isGroup && item.lastSeen && (Date.now() - item.lastSeen) < 120000;
+
+        const div = document.createElement('div');
+        div.className = `contact ${activeChat === id ? 'active' : ''}`;
+        div.style.position = 'relative'; // Нужно для позиционирования точки
+
+        let statusHtml = '';
+        if (isGroup) {
+            statusHtml = `<span style="opacity: 0.7;">Группа: ${item.members.length} уч.</span>`;
         } else {
-            statusHtml = `<span style="opacity: 0.6;">Был(а): ${formatLastSeen(c.lastSeen)}</span>`;
+            statusHtml = isOnline 
+                ? `<span style="color: #00ff00; font-weight: bold;">В сети</span>`
+                : `<span style="opacity: 0.6;">Был(а): ${formatLastSeen(item.lastSeen)}</span>`;
         }
 
-        const div = document.createElement('div');
-        div.className = `contact ${activeChat === c.id ? 'active' : ''}`;
         div.innerHTML = `
             <div style="position: relative;">
-                <img src="${c.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${c.avatar}')">
+                <img src="${item.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${item.avatar}')">
                 ${isOnline ? '<div style="position:absolute; bottom:2px; right:2px; width:12px; height:12px; background:#00ff00; border:2px solid var(--bg); border-radius:50%;"></div>' : ''}
             </div>
-            <div class="contact-info" onclick="loadChat('${c.id}', 'user')">
-                <div class="contact-name">${c.name}</div>
+            <div class="contact-info" onclick="loadChat('${id}', '${isGroup ? 'group' : 'user'}')">
+                <div class="contact-name">
+                    ${isGroup ? '<i class="fas fa-users" style="font-size:12px; margin-right:5px; color:var(--blue)"></i>' : ''}
+                    ${item.name}
+                </div>
                 <div class="contact-last">${statusHtml}</div>
             </div>
-            <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${c.id}')">
+            ${hasUnread ? '<div class="unread-dot"></div>' : ''}
+            <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${id}')">
                 <i class="fas fa-ellipsis-v"></i>
             </div>
         `;
         list.appendChild(div);
     });
 }
+
 
 
 // === ДОБАВЛЕНИЕ КОНТАКТА ===
@@ -521,13 +611,7 @@ async function toggleRecord(mode) {
     } catch(e) { showToast('Нет доступа к микро/камере'); }
 }
 
-function sendFile(input) {
-    const file = input.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = e => sendMsg({ type: file.type.startsWith('video') ? 'video' : 'image', content: e.target.result });
-    reader.readAsDataURL(file);
-}
+
 async function inviteToGroup() {
     // Проверяем, что мы вообще в группе
     if (activeChatType !== 'group') return;
@@ -697,6 +781,83 @@ async function deleteContactFromOptions() {
         showToast("Ошибка при удалении");
     }
 }
+
+async function compressImage(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+
+                // Ограничиваем максимальную сторону 1200px
+                const MAX_SIZE = 1200;
+                if (width > height && width > MAX_SIZE) {
+                    height *= MAX_SIZE / width;
+                    width = MAX_SIZE;
+                } else if (height > MAX_SIZE) {
+                    width *= MAX_SIZE / height;
+                    height = MAX_SIZE;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // Качество 0.7 (70%) — идеальный баланс
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                resolve(dataUrl);
+            };
+        };
+    });
+}
+
+// Обнови свою функцию sendFile
+async function sendFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    if (file.type.startsWith('image')) {
+        showToast("Сжатие...");
+        const compressedBase64 = await compressImage(file);
+        sendMsg({ type: 'image', content: compressedBase64 });
+    } else {
+        // Для видео оставляем как есть (или в будущем через Storage)
+        const reader = new FileReader();
+        reader.onload = e => sendMsg({ type: 'video', content: e.target.result });
+        reader.readAsDataURL(file);
+    }
+}
+
+let typingTimeout;
+function setTypingStatus() {
+    if (!activeChat) return;
+
+    const collection = activeChatType === 'group' ? 'groups' : 'chats';
+    const docId = activeChatType === 'group' ? activeChat : getChatId(state.profile.id, activeChat);
+
+    // Устанавливаем статус "печатает"
+    db.collection(collection).doc(docId).update({
+        [`typing.${state.profile.id}`]: true
+    });
+
+    // Сбрасываем через 3 секунды неактивности
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+        db.collection(collection).doc(docId).update({
+            [`typing.${state.profile.id}`]: false
+        });
+    }, 3000);
+}
+
+// Добавь обработчик на поле ввода в HTML:
+// 
+
 
 function viewAvatarFromOptions() { 
     const c = state.contacts.find(x => x.id === optionsTargetId); 
