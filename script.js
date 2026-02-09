@@ -441,9 +441,12 @@ async function sendMsg(payload = null) {
     const text = textInput.value.trim();
     if(!text && !payload) return;
 
-    const now = Date.now();
+    // Проверка на размер (если это Base64)
+    if (payload && payload.content && payload.content.length > 1000000) {
+        return showToast("Файл слишком большой! Попробуй другое фото.");
+    }
 
-    // 1. Формируем объект сообщения
+    const now = Date.now();
     const msgData = {
         sender: state.profile.id,
         senderName: state.profile.name,
@@ -452,37 +455,27 @@ async function sendMsg(payload = null) {
         time: now
     };
 
-    // Привязываем сообщение к чату или группе
-    if (activeChatType === 'group') {
-        msgData.groupId = activeChat;
-    } else {
-        msgData.chatId = getChatId(state.profile.id, activeChat);
-    }
+    activeChatType === 'group' ? msgData.groupId = activeChat : msgData.chatId = getChatId(state.profile.id, activeChat);
+
+    // Очищаем поле СРАЗУ (для скорости UI)
+    textInput.value = '';
+    autoResize(textInput);
 
     try {
-        // 2. Отправляем само сообщение
         await db.collection("messages").add(msgData);
 
-        // 3. ОБНОВЛЯЕМ МЕТАДАННЫЕ ЧАТА (для счетчика и сортировки)
         const chatPath = activeChatType === 'group' ? 'groups' : 'chats';
         const chatDocId = activeChatType === 'group' ? activeChat : getChatId(state.profile.id, activeChat);
 
         await db.collection(chatPath).doc(chatDocId).update({
             lastMsgTime: now,
-            // Сбрасываем статус "печатает" сразу после отправки
             [`typing.${state.profile.id}`]: false 
         });
-
-        // 4. Очистка поля ввода
-        textInput.value = '';
-        autoResize(textInput);
-        
-        // Фокус обратно на мобилках (опционально)
-        textInput.focus(); 
-
     } catch (e) {
-        console.error("Ошибка при отправке:", e);
-        showToast("Ошибка отправки");
+        console.error(e);
+        showToast("Ошибка. Возможно, файл слишком тяжелый.");
+        // Если ошибка — возвращаем текст обратно, чтобы не потерять
+        if(!payload) textInput.value = text; 
     }
 }
 
@@ -753,6 +746,12 @@ function openContactOptions(id) {
     
     openModal('modalOptions');
 }
+function autoResize(el) {
+    el.style.height = 'auto';
+    const newHeight = el.scrollHeight;
+    // Ограничиваем рост до 120px
+    el.style.height = (newHeight > 120 ? 120 : newHeight) + 'px';
+}
 
 
 async function deleteMessage(msgId) {
@@ -865,7 +864,6 @@ function viewAvatarFromOptions() {
 }
 function viewFullScreen(src) { document.getElementById('lightboxImg').src=src; document.getElementById('lightbox').classList.add('open'); document.getElementById('lightbox').style.display='flex'; }
 function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); setTimeout(()=>document.getElementById('lightbox').style.display='none',300); }
-function autoResize(el) { el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
 function openModal(id) { document.getElementById(id).style.display='flex'; setTimeout(()=>document.getElementById(id).classList.add('open'),10); }
 function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m=>{ m.classList.remove('open'); setTimeout(()=>m.style.display='none',300); }); }
 function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
@@ -883,6 +881,17 @@ setInterval(() => {
 }, 60000);
 
 // Каждую минуту обновляем текст в интерфейсе (чтобы "5 мин. назад" менялось на "6 мин. назад")
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+        const height = window.visualViewport.height;
+        // Ограничиваем высоту всего body высотой видимой области
+        document.body.style.height = height + 'px';
+        // Прокручиваем сообщения вниз, чтобы видеть последнее
+        const list = document.getElementById('messages');
+        list.scrollTop = list.scrollHeight;
+    });
+}
+
 setInterval(() => {
     renderContactList();
     if (activeChat && activeChatType === 'user') {

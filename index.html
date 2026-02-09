@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Маранючок v1.4.5</title>
-    <link rel="manifest" href="/manifest.json">
+    <meta name="description" content="Маранючок — быстрый и безопасный мессенджер для общения с друзьями. Групповые чаты, видеосообщения и мгновенный обмен фото.">
+
+    <meta name="keywords" content="мессенджер, чат, общение, Маранючок, онлайн чат, видеосообщения, бесплатный мессенджер,миринюк, миренюк, маранючище, маранюкчище, миринюк, миранюк, миронюк, маринюк, питух, пеньтюх, жирбон, жир">
+
+    <meta name="author" content="Маранючок">
+
     
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -75,6 +80,20 @@
         .modal { background: var(--bg); width: 90%; max-width: 380px; padding: 24px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); display: flex; flex-direction: column; gap: 12px; max-height: 85vh; transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
         .modal-overlay.open .modal { transform: scale(1); }
         .modal input { width: 100%; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--sec); color: var(--text); outline: none; font-size: 16px; }
+        /* Синяя точка для непрочитанных */
+        .unread-dot {
+            width: 12px;
+            height: 12px;
+            background: var(--blue);
+            border-radius: 50%;
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            box-shadow: 0 0 5px rgba(0, 122, 255, 0.5);
+            border: 2px solid var(--bg); /* Чтобы она не сливалась с фоном */
+        }
+
         
         .modal-btn { padding: 14px; border-radius: 14px; border: none; font-weight: 600; cursor: pointer; font-size: 15px; transition: 0.2s; }
         .modal-btn.primary { background: var(--blue); color: #fff; }
@@ -147,7 +166,7 @@
 
     <div class="input-bar" id="inputBar">
         <label class="btn-icon"><i class="fas fa-paperclip"></i><input type="file" hidden onchange="sendFile(this)"></label>
-        <textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this)"></textarea>
+        <textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this); setTypingStatus()"></textarea>
         <button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')"><i class="fas fa-microphone"></i></button>
         <button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')"><i class="fas fa-camera"></i></button>
         <button class="btn-icon" onclick="sendMsg()"><i class="fas fa-paper-plane"></i></button>
