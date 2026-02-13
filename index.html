@@ -3,33 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Маранючок v2.0</title>
-    <meta name="description" content="Маранючок — современный мессенджер.">
-    <meta name="theme-color" content="#ffffff">
-    <link rel="manifest" href="manifest.json">
+    <title>Маранючок v1.4.5</title>
+    <meta name="description" content="Маранючок — быстрый и безопасный мессенджер для общения с друзьями. Групповые чаты, видеосообщения и мгновенный обмен фото.">
 
+    <meta name="keywords" content="мессенджер, чат, общение, Маранючок, онлайн чат, видеосообщения, бесплатный мессенджер,миринюк, миренюк, маранючище, маранюкчище, миринюк, миранюк, миронюк, маринюк, питух, пеньтюх, жирбон, жир">
+
+    <meta name="author" content="Маранючок">
+
+    
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
 
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <script src="https://unpkg.com/@emoji-mart/data"></script>
-    <script src="https://unpkg.com/emoji-mart@5.5.2/dist/browser.js"></script>
-    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+    
+    <style>
+        :root {
+            --bg: #ffffff; --sec: #f4f4f5; --text: #1c1c1e; --hint: #8e8e93;
+            --blue: #007aff; --red: #ff3b30; --msg-in: #e9e9eb; --msg-out: #007aff; --border: #e5e5ea;
+            --radius: 18px;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1c1c1e; --sec: #2c2c2e; --text: #ffffff; --hint: #98989d;
+                --blue: #0a84ff; --msg-in: #3a3a3c; --msg-out: #0a84ff; --border: #38383a;
+            }
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { background: var(--bg); color: var(--text); height: 100dvh; display: flex; overflow: hidden; font-size: 15px; }
 
-    <link rel="stylesheet" href="style.css">
+        .sidebar { width: 350px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg); z-index: 2; position: relative; transition: transform 0.3s ease; }
+        .chat-wrap { flex: 1; display: flex; flex-direction: column; background: var(--sec); position: relative; z-index: 1; transition: transform 0.3s ease; }
+
+        .header { height: 60px; padding: 0 15px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
+        .avatar { width: 44px; height: 44px; border-radius: 50%; background: #ccc; object-fit: cover; cursor: pointer; flex-shrink: 0; transition: transform 0.2s; border: 1px solid var(--border); }
+        .avatar:active { transform: scale(0.95); }
+        .avatar.large { width: 100px; height: 100px; border: 4px solid var(--blue); margin: 0 auto; display: block; }
+        
+        audio { height: 40px; max-width: 240px; border-radius: 20px; margin: 4px 0; }
+        video.circle-msg { width: 220px; height: 220px; border-radius: 50%; object-fit: cover; border: 3px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); background: #000; }
+
+        .contact-list { flex: 1; overflow-y: auto; scrollbar-width: thin; }
+        .contact { padding: 12px 15px; display: flex; gap: 12px; align-items: center; cursor: pointer; transition: background 0.2s; position: relative; }
+        .contact:hover { background: var(--sec); }
+        .contact.active { background: var(--sec); }
+        
+        .contact-info { flex: 1; overflow: hidden; }
+        .contact-name { font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+        .contact-last { font-size: 13px; color: var(--hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+        
+        .contact-opt-btn { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--hint); transition: 0.2s; z-index: 5; }
+
+        .messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; }
+        .msg { max-width: 75%; padding: 10px 14px; border-radius: var(--radius); font-size: 15px; position: relative; word-wrap: break-word; animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .msg.in { background: var(--msg-in); align-self: flex-start; border-bottom-left-radius: 4px; }
+        .msg.out { background: var(--msg-out); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+        .msg.has-circle { background: transparent !important; padding: 0; box-shadow: none; }
+        
+        .msg img, .msg video:not(.circle-msg) { max-width: 100%; border-radius: 12px; margin-top: 5px; display: block; cursor: pointer; }
+        .msg-meta { font-size: 10px; opacity: 0.6; text-align: right; margin-top: 4px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+
+        .input-bar { background: var(--bg); padding: 10px; display: flex; gap: 10px; align-items: flex-end; border-top: 1px solid var(--border); }
+        .input-field { flex: 1; background: var(--sec); border-radius: 20px; padding: 10px 15px; border: none; outline: none; color: var(--text); resize: none; max-height: 120px; font-size: 16px; }
+
+        .btn-icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; color: var(--blue); font-size: 20px; cursor: pointer; border: none; background: none; }
+        .btn-icon.rec { color: var(--red); animation: pulse 1s infinite; background: rgba(255,59,48,0.1); border-radius: 50%; }
+
+        .fab { position: absolute; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%; background: var(--blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); border: none; cursor: pointer; z-index: 1000; transition: transform 0.2s; }
+        .fab-menu { position: absolute; bottom: 85px; right: 20px; display: none; flex-direction: column; gap: 10px; z-index: 1000; }
+        .fab-menu.open { display: flex; animation: popIn 0.2s; }
+        .fab-item { background: var(--bg); color: var(--text); padding: 12px 18px; border-radius: 14px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; cursor: pointer; border: 1px solid var(--border); font-weight: 500; }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 2000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(8px); opacity: 0; transition: opacity 0.3s; }
+        .modal-overlay.open { opacity: 1; }
+        .modal { background: var(--bg); width: 90%; max-width: 380px; padding: 24px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); display: flex; flex-direction: column; gap: 12px; max-height: 85vh; transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .modal-overlay.open .modal { transform: scale(1); }
+        .modal input { width: 100%; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--sec); color: var(--text); outline: none; font-size: 16px; }
+        /* Синяя точка для непрочитанных */
+        .unread-dot {
+            width: 12px;
+            height: 12px;
+            background: var(--blue);
+            border-radius: 50%;
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            box-shadow: 0 0 5px rgba(0, 122, 255, 0.5);
+            border: 2px solid var(--bg); /* Чтобы она не сливалась с фоном */
+        }
+
+        
+        .modal-btn { padding: 14px; border-radius: 14px; border: none; font-weight: 600; cursor: pointer; font-size: 15px; transition: 0.2s; }
+        .modal-btn.primary { background: var(--blue); color: #fff; }
+        .modal-btn.sec { background: var(--sec); color: var(--text); }
+        .modal-btn.danger { background: rgba(255, 59, 48, 0.1); color: var(--red); }
+
+        .user-select-list { overflow-y: auto; max-height: 200px; border: 1px solid var(--border); border-radius: 14px; padding: 5px; background: var(--sec); }
+
+        .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 3000; display: none; align-items: center; justify-content: center; cursor: zoom-out; opacity: 0; transition: opacity 0.3s; }
+        .lightbox.open { opacity: 1; }
+        .lightbox img { max-width: 95%; max-height: 95%; border-radius: 10px; transform: scale(0.9); transition: transform 0.3s; }
+        .lightbox.open img { transform: scale(1); }
+
+        .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: #fff; padding: 10px 20px; border-radius: 20px; font-size: 14px; z-index: 9999; pointer-events: none; opacity: 0; transition: 0.3s; }
+
+        @keyframes popIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+
+        @media (max-width: 768px) {
+            .sidebar { width: 100%; position: absolute; inset: 0; }
+            .chat-wrap { position: absolute; inset: 0; transform: translateX(100%); }
+            .chat-wrap.active { transform: translateX(0); }
+            .sidebar.hidden { transform: translateX(-30%); opacity: 0; pointer-events: none; }
+        }
+    </style>
 </head>
 <body>
 
-<div id="dropZone" class="drop-zone">
-    <i class="fas fa-cloud-upload-alt"></i>
-    <p>Отпустить файл для отправки</p>
-</div>
-
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
-    <button class="close-lb"><i class="fas fa-times"></i></button>
     <img id="lightboxImg" src="">
 </div>
 
@@ -37,186 +130,120 @@
 
 <div class="sidebar" id="sidebar">
     <div class="header">
-        <div class="profile-summary" onclick="openSettings()">
-            <img id="myAvatarDisplay" class="avatar" src="https://ui-avatars.com/api/?name=User">
-            <div class="user-meta">
-                <div id="myNameDisplay" class="user-name">Загрузка...</div>
-                <div id="myIdDisplay" class="user-id">@id</div>
-            </div>
-        </div>
-        <button class="btn-icon" onclick="openModal('modalSettings')"><i class="fas fa-cog"></i></button>
-    </div>
-
-    <div class="search-bar-container">
-        <div class="search-input-wrapper">
-            <i class="fas fa-search"></i>
-            <input type="text" id="globalSearch" placeholder="Поиск чатов и сообщений..." oninput="handleSearch(this.value)">
+        <img id="myAvatarDisplay" class="avatar" src="" onclick="openSettings()">
+        <div style="flex:1; margin-left:10px; overflow:hidden;">
+            <div id="myNameDisplay" style="font-weight:700; font-size:16px;">Загрузка...</div>
+            <div id="myIdDisplay" style="font-size:12px; opacity:0.6; cursor:pointer;" onclick="copyMyId()">Нажми, чтобы скопировать ID</div>
         </div>
     </div>
     
-    <div id="skeletonLoader" class="skeleton-list">
-        <div class="skeleton-item"></div>
-        <div class="skeleton-item"></div>
-        <div class="skeleton-item"></div>
-    </div>
-
     <div class="contact-list" id="contactList"></div>
 
     <button class="fab" onclick="toggleFabMenu()"><i class="fas fa-plus"></i></button>
     
     <div class="fab-menu" id="fabMenu">
         <div class="fab-item" onclick="openModal('modalAdd'); toggleFabMenu()">
-            <i class="fas fa-user-plus"></i> Найти контакт
+            <i class="fas fa-user-plus"></i> Найти друга
         </div>
         <div class="fab-item" onclick="openCreateGroupModal(); toggleFabMenu()">
             <i class="fas fa-users"></i> Создать группу
-        </div>
-        <div class="fab-item" onclick="openThemeModal(); toggleFabMenu()">
-            <i class="fas fa-palette"></i> Тема
         </div>
     </div>
 </div>
 
 <div class="chat-wrap" id="chatWrap">
-    <div class="chat-header">
-        <button class="btn-icon back-btn" onclick="closeChat()"><i class="fas fa-chevron-left"></i></button>
+    <div class="header">
+        <button class="btn-icon" onclick="closeChat()"><i class="fas fa-chevron-left"></i></button>
         <img id="chatAvatar" class="avatar" src="" onclick="viewFullScreen(this.src)">
-        <div class="chat-info" onclick="openContactOptions(activeChat)">
-            <div id="chatName" class="chat-title">Выберите чат</div>
-            <div id="chatStatus" class="chat-status"></div>
+        <div style="flex:1; margin-left: 10px; cursor:pointer; overflow:hidden;" onclick="openContactOptions(activeChat)">
+            <div id="chatName" style="font-weight:600">Выберите чат</div>
+            <div id="chatStatus" style="font-size:12px; color:var(--blue)">Ожидание...</div>
         </div>
-        <button class="btn-icon" onclick="openLocalSearch()"><i class="fas fa-search"></i></button>
         <button class="btn-icon" onclick="openContactOptions(activeChat)"><i class="fas fa-ellipsis-v"></i></button>
     </div>
     
-    <div id="localSearchPanel" class="local-search-panel" style="display:none;">
-        <input type="text" id="localSearchInput" placeholder="Найти в этом чате...">
-        <button onclick="closeLocalSearch()"><i class="fas fa-times"></i></button>
-    </div>
-
-    <div class="messages" id="messages">
-        <div class="empty-state">
-            <i class="far fa-comments"></i>
-            <p>Выберите чат, чтобы начать общение</p>
-        </div>
-    </div>
-
-    <div id="replyPanel" class="reply-panel">
-        <div class="reply-content">
-            <div class="reply-line"></div>
-            <div style="flex:1; overflow: hidden;">
-                <div id="replyToName" class="reply-name">Name</div>
-                <div id="replyToText" class="reply-text">Message</div>
-            </div>
-            <button onclick="cancelReply()"><i class="fas fa-times"></i></button>
-        </div>
-    </div>
+    <div class="messages" id="messages"></div>
 
     <div class="input-bar" id="inputBar">
-        <button class="btn-icon" onclick="toggleEmojiPicker()"><i class="far fa-smile"></i></button>
-        <label class="btn-icon"><i class="fas fa-paperclip"></i><input type="file" id="fileInput" hidden onchange="sendFile(this)"></label>
-        
+        <label class="btn-icon"><i class="fas fa-paperclip"></i><input type="file" hidden onchange="sendFile(this)"></label>
         <textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this); setTypingStatus()"></textarea>
-        
         <button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')"><i class="fas fa-microphone"></i></button>
         <button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')"><i class="fas fa-camera"></i></button>
-        <button id="sendBtn" class="btn-icon send-btn" onclick="sendMsg()"><i class="fas fa-paper-plane"></i></button>
+        <button class="btn-icon" onclick="sendMsg()"><i class="fas fa-paper-plane"></i></button>
     </div>
-
-    <div id="emojiContainer" class="emoji-container"></div>
 </div>
 
 <div class="modal-overlay" id="modalWelcome">
-    <div class="modal fade-in">
-        <h3>Добро пожаловать</h3>
-        <div class="avatar-upload-wrapper">
+    <div class="modal">
+        <h3>Вход / Регистрация</h3>
+        <div style="text-align:center;">
             <img id="welcomePreview" class="avatar large" src="https://ui-avatars.com/api/?name=M&background=888&color=fff">
-            <div class="edit-badge" onclick="document.getElementById('setupAvatarInput').click()"><i class="fas fa-camera"></i></div>
-            <input type="file" id="setupAvatarInput" hidden onchange="handleAvatarUpload(this, 'welcomePreview')">
         </div>
-        <input type="hidden" id="setupAvatarUrl"> <div class="input-group">
-            <input type="email" id="setupEmail" placeholder="Email">
-            <input type="password" id="setupPassword" placeholder="Пароль">
+        <input type="email" id="setupEmail" placeholder="Email">
+        <input type="password" id="setupPassword" placeholder="Пароль">
+        <hr style="border:none; height:1px; background:var(--border);">
+        <input type="text" id="setupShortId" placeholder="Придумайте ID (например: max2024)">
+        <input type="text" id="setupName" placeholder="Ваше Имя">
+        <div style="display:flex; gap:8px;">
+            <input type="text" id="setupAvatar" placeholder="Ссылка на фото" oninput="updatePreview('welcomePreview', this.value)">
+            <button class="modal-btn sec" style="width:50px" onclick="setRandomAvatar('setupAvatar', 'welcomePreview')"><i class="fas fa-dice"></i></button>
         </div>
-        
-        <div class="divider"><span>или зарегистрируйтесь</span></div>
-        
-        <div class="input-group">
-            <input type="text" id="setupShortId" placeholder="@username">
-            <input type="text" id="setupName" placeholder="Ваше Имя">
-        </div>
-        
         <button class="modal-btn primary" onclick="handleAuth()">Продолжить</button>
     </div>
 </div>
 
 <div class="modal-overlay" id="modalAdd">
-    <div class="modal zoom-in">
+    <div class="modal">
         <h3>Новый контакт</h3>
-        <input type="text" id="addId" placeholder="Введите @username друга">
+        <input type="text" id="addId" placeholder="Введите ID друга">
         <button class="modal-btn primary" onclick="addContact()">Найти</button>
         <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
     </div>
 </div>
 
 <div class="modal-overlay" id="modalCreateGroup">
-    <div class="modal zoom-in">
+    <div class="modal">
         <h3>Создать группу</h3>
         <input type="text" id="newGroupName" placeholder="Название группы">
-        <div class="contact-select-label">Участники:</div>
-        <div class="user-select-list" id="groupUserList"></div>
-        <button class="modal-btn primary" onclick="finishCreateGroup()">Создать</button>
+        
+        <div id="groupContactSection">
+            <div style="font-size:12px; opacity:0.7; margin-bottom:5px;">Выберите друзей:</div>
+            <div class="user-select-list" id="groupUserList"></div>
+        </div>
+
+        <div style="margin-top: 10px;">
+            <div id="manualLabel" style="font-size:12px; opacity:0.7; margin-bottom:5px;">Или введите ID через запятую:</div>
+            <input type="text" id="manualIds" placeholder="id1, id2, id3">
+        </div>
+
+        <button class="modal-btn primary" onclick="finishCreateGroup()">Создать группу</button>
         <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
     </div>
 </div>
 
 <div class="modal-overlay" id="modalSettings">
-    <div class="modal zoom-in">
-        <h3>Настройки</h3>
-        <div class="avatar-upload-wrapper">
-            <img id="setMyAvatarPreview" class="avatar large" src="">
-            <div class="edit-badge" onclick="document.getElementById('settingAvatarInput').click()"><i class="fas fa-camera"></i></div>
-             <input type="file" id="settingAvatarInput" hidden onchange="handleAvatarUpload(this, 'setMyAvatarPreview')">
+    <div class="modal">
+        <h3>Настройки профиля</h3>
+        <input type="text" id="setMyName" placeholder="Имя">
+        <div style="display:flex; gap:8px;">
+            <input type="text" id="setMyAvatar" placeholder="Ссылка на аватар">
+            <button class="modal-btn sec" style="width:50px" onclick="setRandomAvatar('setMyAvatar', null)"><i class="fas fa-dice"></i></button>
         </div>
-        
-        <div class="input-group">
-            <label>Имя</label>
-            <input type="text" id="setMyName">
-        </div>
-        
-        <div class="settings-actions">
-            <button class="modal-btn primary" onclick="saveSettings()">Сохранить</button>
-            <button class="modal-btn sec" onclick="openThemeModal()">Тема оформления</button>
-            <button class="modal-btn danger" onclick="logout()">Выйти</button>
-        </div>
-        <button class="modal-btn sec" onclick="closeModals()">Закрыть</button>
-    </div>
-</div>
-
-<div class="modal-overlay" id="modalTheme">
-    <div class="modal zoom-in">
-        <h3>Оформление</h3>
-        <div class="theme-grid">
-            <div class="theme-circle" style="background:#007aff" onclick="setTheme('#007aff')"></div>
-            <div class="theme-circle" style="background:#ff3b30" onclick="setTheme('#ff3b30')"></div>
-            <div class="theme-circle" style="background:#34c759" onclick="setTheme('#34c759')"></div>
-            <div class="theme-circle" style="background:#af52de" onclick="setTheme('#af52de')"></div>
-            <div class="theme-circle" style="background:#ff9500" onclick="setTheme('#ff9500')"></div>
-            <div class="theme-circle" style="background:#5856d6" onclick="setTheme('#5856d6')"></div>
-        </div>
+        <button class="modal-btn primary" onclick="saveSettings()">Сохранить</button>
+        <button class="modal-btn danger" onclick="logout()">Выйти из аккаунта</button>
         <button class="modal-btn sec" onclick="closeModals()">Закрыть</button>
     </div>
 </div>
 
 <div class="modal-overlay" id="modalOptions">
-    <div class="modal bottom-sheet">
-        <h3 id="optName">Меню</h3>
-        <div id="optionsButtons" class="options-list">
-            </div>
+    <div class="modal">
+        <h3 id="optName">Опции</h3>
+        <button class="modal-btn primary" onclick="viewAvatarFromOptions()">Смотреть аватар</button>
+        <button class="modal-btn danger" onclick="deleteContactFromOptions()">Удалить чат</button>
         <button class="modal-btn sec" onclick="closeModals()">Отмена</button>
     </div>
 </div>
 
 <script src="script.js"></script>
 </body>
-</html>
+    </html>
