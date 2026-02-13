@@ -372,42 +372,47 @@ function loadChat(targetId, type = 'user') {
 
 function renderMessages(msgs) {
 		const container = document.getElementById('messages');
+		if (!container) return;
 		container.innerHTML = '';
 
 		msgs.forEach(m => {
 				const isMine = m.sender === state.profile.id;
 				const msgDiv = document.createElement('div');
 				
-				// Если есть кружок (видеосообщение), добавляем спец-класс
+				// Классы для своих и чужих
 				const hasCircle = m.type === 'video_note' ? 'has-circle' : '';
 				msgDiv.className = `msg ${isMine ? 'out' : 'in'} ${hasCircle}`;
 				msgDiv.id = `msg-${m.id}`;
 
-				// Генерация контента (текст, фото, аудио, видео)
-				let contentHtml = '';
+				// --- 1. ТЕКСТ ИЛИ МЕДИА ---
+				let bodyHtml = '';
 				if (m.type === 'image') {
-						contentHtml = `<img src="${m.fileUrl}" onclick="viewFullScreen('${m.fileUrl}')">`;
-				} else if (m.type === 'audio') {
-						contentHtml = `<audio src="${m.fileUrl}" controls></audio>`;
+						bodyHtml = `<img src="${m.content}" onclick="viewFullScreen('${m.content}')">`;
 				} else if (m.type === 'video_note') {
-						contentHtml = `<video class="circle-msg" src="${m.fileUrl}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
+						bodyHtml = `<video class="circle-msg" src="${m.content}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
+				} else if (m.type === 'audio') {
+						bodyHtml = `<audio src="${m.content}" controls></audio>`;
 				} else {
-						contentHtml = `<div>${m.text || ''}</div>`;
+						// ВАЖНО: используем m.content, так как в sendMsg ты шлешь именно его
+						const text = m.content || m.text || ''; 
+						bodyHtml = text ? `<span>${text}</span>` : '';
 				}
 
-				// Блок реакций
-				let reactionsHtml = '<div class="reaction-container" id="react-cont-' + m.id + '">';
+				// --- 2. РЕАКЦИИ ---
+				let reactionsHtml = '<div class="reaction-container">';
 				if (m.reactions) {
 						for (const [emoji, users] of Object.entries(m.reactions)) {
-								const activeClass = users.includes(state.profile.id) ? 'active' : '';
-								reactionsHtml += `
-										<div class="reaction-badge ${activeClass}" onclick="toggleReaction('${m.id}', '${emoji}')">
-												${emoji} <span>${users.length}</span>
-										</div>`;
+								if (users && users.length > 0) {
+										const activeClass = users.includes(state.profile.id) ? 'active' : '';
+										reactionsHtml += `
+												<div class="reaction-badge ${activeClass}" onclick="toggleReaction('${m.id}', '${emoji}')">
+														${emoji} <span>${users.length}</span>
+												</div>`;
+								}
 						}
 				}
 
-				// ГЛАВНОЕ: Плюсик только для ЧУЖИХ сообщений
+				// Плюсик ТОЛЬКО для чужих сообщений
 				if (!isMine) {
 						reactionsHtml += `
 								<div class="add-reaction" onclick="showReactionMenu(event, '${m.id}')">
@@ -416,7 +421,7 @@ function renderMessages(msgs) {
 				}
 				reactionsHtml += '</div>';
 
-				// Мета-данные (время и статус)
+				// --- 3. ВРЕМЯ И СТАТУС ---
 				const time = m.time ? new Date(m.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
 				const statusIcon = isMine ? (m.read ? '<i class="fas fa-check-double"></i>' : '<i class="fas fa-check"></i>') : '';
 				
@@ -425,17 +430,13 @@ function renderMessages(msgs) {
 								${time} ${statusIcon}
 						</div>`;
 
-				msgDiv.innerHTML = contentHtml + reactionsHtml + metaHtml;
+				// Сборка всего воедино
+				msgDiv.innerHTML = bodyHtml + reactionsHtml + metaHtml;
 				container.appendChild(msgDiv);
 		});
 
 		container.scrollTop = container.scrollHeight;
 }
-
-
-// Простое меню выбора быстрых реакций
-
-
 
 async function sendMsg(payload = null) {
     if(!activeChat) return;
