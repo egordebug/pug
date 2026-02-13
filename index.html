@@ -252,36 +252,37 @@
         <button class="btn-icon" onclick="openContactOptions(activeChat)"><i class="fas fa-ellipsis-v"></i></button>
     </div>
     
-    <div class="messages" id="messages"></div>
+<div class="messages" id="messages"></div>
 
 <div class="input-bar" id="inputBar">
-		<div id="emojiPickerContainer">
-				<emoji-picker class="dark"></emoji-picker>
+				<div id="emojiPickerContainer" style="display: none;">
+						<emoji-picker class="dark"></emoji-picker>
+				</div>
+
+				<button class="btn-icon" onclick="toggleEmojiPicker(event)">
+                		<i class="far fa-smile"></i>
+                </button>
+				
+				<label class="btn-icon">
+						<i class="fas fa-paperclip"></i>
+						<input type="file" hidden onchange="sendFile(this)">
+				</label>
+
+				<textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this); setTypingStatus()"></textarea>
+
+				<div class="input-actions">
+						<button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')">
+								<i class="fas fa-microphone"></i>
+						</button>
+						<button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')">
+								<i class="fas fa-camera"></i>
+						</button>
+						<button class="btn-icon" onclick="sendMsg()">
+								<i class="fas fa-paper-plane"></i>
+						</button>
+				</div>
 		</div>
 
-		<button class="btn-icon" onclick="toggleEmojiPicker()">
-				<i class="far fa-smile"></i>
-		</button>
-
-		<label class="btn-icon">
-				<i class="fas fa-paperclip"></i>
-				<input type="file" hidden onchange="sendFile(this)">
-		</label>
-
-		<textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this); setTypingStatus()"></textarea>
-
-		<button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')">
-				<i class="fas fa-microphone"></i>
-		</button>
-		
-		<button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')">
-				<i class="fas fa-camera"></i>
-		</button>
-
-		<button class="btn-icon" onclick="sendMsg()">
-				<i class="fas fa-paper-plane"></i>
-		</button>
-</div>
 
 
 <div class="modal-overlay" id="modalWelcome">

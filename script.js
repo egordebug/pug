@@ -371,95 +371,69 @@ function loadChat(targetId, type = 'user') {
 
 
 function renderMessages(msgs) {
-    const list = document.getElementById('messages');
-    list.innerHTML = '';
-    
-    let partnerLastRead = 0;
-    if (activeChatType === 'user') {
-        const partnerData = state.contacts.find(c => c.id === activeChat);
-        if (partnerData && partnerData.lastRead) {
-            partnerLastRead = partnerData.lastRead[activeChat] || 0;
-        }
-    }
+		const container = document.getElementById('messages');
+		container.innerHTML = '';
 
-    msgs.forEach(m => {
-        const isMine = m.sender === state.profile.id;
-        let content = '';
-        
-        if (m.type === 'text') content = m.content.replace(/\n/g, '<br>');
-        else if (m.type === 'image') content = `<img src="${m.content}" onclick="viewFullScreen(this.src)">`;
-        else if (m.type === 'audio') content = `<audio controls src="${m.content}"></audio>`;
-        else if (m.type === 'video_note') content = `<video class="circle-msg" src="${m.content}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
+		msgs.forEach(m => {
+				const isMine = m.sender === state.profile.id;
+				const msgDiv = document.createElement('div');
+				
+				// Если есть кружок (видеосообщение), добавляем спец-класс
+				const hasCircle = m.type === 'video_note' ? 'has-circle' : '';
+				msgDiv.className = `msg ${isMine ? 'out' : 'in'} ${hasCircle}`;
+				msgDiv.id = `msg-${m.id}`;
 
-        // --- Блок реакций ---
-        let reactionsHtml = '<div class="reaction-container">';
-        if (m.reactions) {
-            for (const [emoji, users] of Object.entries(m.reactions)) {
-                const amIReacted = users.includes(state.profile.id);
-                reactionsHtml += `
-                    <div class="reaction-badge ${amIReacted ? 'active' : ''}" onclick="toggleReaction('${m.id}', '${emoji}')">
-                        ${emoji} <span>${users.length}</span>
-                    </div>`;
-            }
-        }
-        // Кнопка быстрого добавления (например, сердечко) или вызова меню
-        reactionsHtml += `<div class="add-reaction" onclick="showReactionMenu(event, '${m.id}')">+</div>`;
-        reactionsHtml += '</div>';
+				// Генерация контента (текст, фото, аудио, видео)
+				let contentHtml = '';
+				if (m.type === 'image') {
+						contentHtml = `<img src="${m.fileUrl}" onclick="viewFullScreen('${m.fileUrl}')">`;
+				} else if (m.type === 'audio') {
+						contentHtml = `<audio src="${m.fileUrl}" controls></audio>`;
+				} else if (m.type === 'video_note') {
+						contentHtml = `<video class="circle-msg" src="${m.fileUrl}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
+				} else {
+						contentHtml = `<div>${m.text || ''}</div>`;
+				}
 
-        const div = document.createElement('div');
-        div.className = `msg ${isMine ? 'out' : 'in'}`;
-        
-        let statusHtml = '';
-        if (isMine && activeChatType === 'user') {
-            statusHtml = m.time <= partnerLastRead 
-                ? '<i class="fas fa-check-double status-icon read"></i>' 
-                : '<i class="fas fa-check status-icon"></i>';
-        }
+				// Блок реакций
+				let reactionsHtml = '<div class="reaction-container" id="react-cont-' + m.id + '">';
+				if (m.reactions) {
+						for (const [emoji, users] of Object.entries(m.reactions)) {
+								const activeClass = users.includes(state.profile.id) ? 'active' : '';
+								reactionsHtml += `
+										<div class="reaction-badge ${activeClass}" onclick="toggleReaction('${m.id}', '${emoji}')">
+												${emoji} <span>${users.length}</span>
+										</div>`;
+						}
+				}
 
-        div.innerHTML = `
-            ${activeChatType === 'group' && !isMine ? `<div class="sender-name">${m.senderName}</div>` : ''}
-            <div class="msg-content">${content}</div>
-            ${reactionsHtml}
-            <div class="msg-meta">
-                ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                ${statusHtml}
-            </div>
-        `;
-        
-        // Удаление по правому клику (или долгому нажатию)
-        div.oncontextmenu = (e) => { 
-            e.preventDefault(); 
-            if(isMine && confirm('Удалить сообщение?')) deleteMessage(m.id); 
-        };
+				// ГЛАВНОЕ: Плюсик только для ЧУЖИХ сообщений
+				if (!isMine) {
+						reactionsHtml += `
+								<div class="add-reaction" onclick="showReactionMenu(event, '${m.id}')">
+										<i class="far fa-smile"></i>
+								</div>`;
+				}
+				reactionsHtml += '</div>';
 
-        list.appendChild(div);
-    });
-    list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+				// Мета-данные (время и статус)
+				const time = m.time ? new Date(m.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+				const statusIcon = isMine ? (m.read ? '<i class="fas fa-check-double"></i>' : '<i class="fas fa-check"></i>') : '';
+				
+				const metaHtml = `
+						<div class="msg-meta">
+								${time} ${statusIcon}
+						</div>`;
+
+				msgDiv.innerHTML = contentHtml + reactionsHtml + metaHtml;
+				container.appendChild(msgDiv);
+		});
+
+		container.scrollTop = container.scrollHeight;
 }
+
 
 // Простое меню выбора быстрых реакций
-function showReactionMenu(e, msgId) {
-    e.stopPropagation();
-    const quickEmojis = ['❤️', '👍', '🔥', '😂', '😮', '😢'];
-    const menu = document.createElement('div');
-    menu.className = 'quick-reaction-menu';
-    // Позиционируем меню рядом с курсором/нажатием
-    menu.style.left = e.pageX + 'px';
-    menu.style.top = e.pageY + 'px';
-    
-    quickEmojis.forEach(emoji => {
-        const btn = document.createElement('span');
-        btn.innerText = emoji;
-        btn.onclick = () => { toggleReaction(msgId, emoji); menu.remove(); };
-        menu.appendChild(btn);
-    });
-
-    document.body.appendChild(menu);
-    // Удаляем меню при клике в любое другое место
-    setTimeout(() => {
-        window.onclick = () => { menu.remove(); window.onclick = null; };
-    }, 100);
-}
 
 
 
@@ -893,53 +867,108 @@ function viewAvatarFromOptions() {
 function viewFullScreen(src) { document.getElementById('lightboxImg').src=src; document.getElementById('lightbox').classList.add('open'); document.getElementById('lightbox').style.display='flex'; }
 function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); setTimeout(()=>document.getElementById('lightbox').style.display='none',300); }
 function openModal(id) { document.getElementById(id).style.display='flex'; setTimeout(()=>document.getElementById(id).classList.add('open'),10); }
+// Функция добавления/удаления реакции
 async function toggleReaction(msgId, emoji) {
-    const msgRef = db.collection("messages").doc(msgId);
-    
-    try {
-        const doc = await msgRef.get();
-        if (!doc.exists) return;
+		const myId = state.profile.id;
+		// Важно: сообщения у тебя в корневой коллекции messages
+		const msgRef = db.collection('messages').doc(msgId);
 
-        const data = doc.data();
-        let reactions = data.reactions || {};
+		try {
+				const doc = await msgRef.get();
+				if (!doc.exists) return;
 
-        if (!reactions[emoji]) {
-            reactions[emoji] = [];
-        }
+				let reactions = doc.data().reactions || {};
+				if (!reactions[emoji]) reactions[emoji] = [];
 
-        const myId = state.profile.id;
-        if (reactions[emoji].includes(myId)) {
-            // Если уже ставил — убираем
-            reactions[emoji] = reactions[emoji].filter(id => id !== myId);
-            if (reactions[emoji].length === 0) delete reactions[emoji];
-        } else {
-            // Если не ставил — добавляем
-            reactions[emoji].push(myId);
-        }
+				if (reactions[emoji].includes(myId)) {
+						// Убираем реакцию
+						reactions[emoji] = reactions[emoji].filter(id => id !== myId);
+						if (reactions[emoji].length === 0) delete reactions[emoji];
+				} else {
+						// Добавляем реакцию
+						reactions[emoji].push(myId);
+				}
 
-        await msgRef.update({ reactions });
-    } catch (e) {
-        console.error("Ошибка реакции:", e);
-    }
+				await msgRef.update({ reactions });
+		} catch (e) {
+				console.error("Ошибка реакции:", e);
+				showToast("Не удалось поставить реакцию");
+		}
 }
+
+// Быстрое меню реакций (всплывашка)
+function showReactionMenu(e, msgId) {
+		e.stopPropagation();
+		// Удаляем старое меню, если оно есть
+		const oldMenu = document.querySelector('.quick-reaction-menu');
+		if (oldMenu) oldMenu.remove();
+
+		const menu = document.createElement('div');
+		menu.className = 'quick-reaction-menu';
+		
+		const emojis = ['👍', '❤️', '😂', '😮', '😡', '🙏'];
+		emojis.forEach(emoji => {
+				const span = document.createElement('span');
+				span.innerText = emoji;
+				span.onclick = () => {
+						toggleReaction(msgId, emoji);
+						menu.remove();
+				};
+				menu.appendChild(span);
+		});
+
+		// Позиционируем меню рядом с кликом
+		menu.style.top = `${e.clientY - 50}px`;
+		menu.style.left = `${e.clientX}px`;
+
+		document.body.appendChild(menu);
+
+		// Закрытие меню при клике в любое другое место
+		setTimeout(() => {
+				document.addEventListener('click', () => menu.remove(), { once: true });
+		}, 10);
+}
+
 
 function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m=>{ m.classList.remove('open'); setTimeout(()=>m.style.display='none',300); }); }
 function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
 function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,2500); }
 function copyMyId() { navigator.clipboard.writeText(state.profile.shortId); showToast('ID скопирован'); }
 
-// Переключение видимости пикера
-function toggleEmojiPicker() {
-    const picker = document.getElementById('emojiPickerContainer');
-    picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
+// Переключение видимости пикера (исправлено)
+function toggleEmojiPicker(e) {
+		if (e) e.stopPropagation(); // Чтобы клик по кнопке не закрывал пикер сразу
+		const picker = document.getElementById('emojiPickerContainer');
+		const isHidden = picker.style.display === 'none' || picker.style.display === '';
+		picker.style.display = isHidden ? 'block' : 'none';
+
+		if (isHidden) {
+				// Закрытие при клике мимо
+				const closeHandler = (event) => {
+						if (!picker.contains(event.target) && !event.target.closest('.btn-icon')) {
+								picker.style.display = 'none';
+								document.removeEventListener('click', closeHandler);
+						}
+				};
+				document.addEventListener('click', closeHandler);
+		}
 }
 
-// Обработка выбора эмодзи
+// Обработка выбора эмодзи (с учетом позиции курсора)
 document.querySelector('emoji-picker').addEventListener('emoji-click', event => {
-    const input = document.getElementById('msgInput');
-    input.value += event.detail.unicode; // Добавляем эмодзи в поле ввода
-    toggleEmojiPicker(); // Закрываем
-    input.focus();
+		const input = document.getElementById('msgInput');
+		const start = input.selectionStart;
+		const end = input.selectionEnd;
+		const emoji = event.detail.unicode;
+
+		// Вставляем там, где моргает палочка
+		input.value = input.value.substring(0, start) + emoji + input.value.substring(end);
+		
+		// Возвращаем фокус и ставим курсор ПОСЛЕ смайлика
+		input.focus();
+		input.selectionStart = input.selectionEnd = start + emoji.length;
+		
+		autoResize(input);
 });
 
 
