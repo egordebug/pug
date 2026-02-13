@@ -374,12 +374,8 @@ function renderMessages(msgs) {
     const list = document.getElementById('messages');
     list.innerHTML = '';
     
-    // Получаем время прочтения чата собеседником
-    // Для лички берем время партнера, для групп эта логика обычно сложнее, сделаем для лички
     let partnerLastRead = 0;
     if (activeChatType === 'user') {
-        const chatDocId = getChatId(state.profile.id, activeChat);
-        // Мы берем данные из метаданных контакта, которые сохранили в listenToData
         const partnerData = state.contacts.find(c => c.id === activeChat);
         if (partnerData && partnerData.lastRead) {
             partnerLastRead = partnerData.lastRead[activeChat] || 0;
@@ -389,50 +385,82 @@ function renderMessages(msgs) {
     msgs.forEach(m => {
         const isMine = m.sender === state.profile.id;
         let content = '';
-        let extraClass = '';
         
         if (m.type === 'text') content = m.content.replace(/\n/g, '<br>');
         else if (m.type === 'image') content = `<img src="${m.content}" onclick="viewFullScreen(this.src)">`;
         else if (m.type === 'audio') content = `<audio controls src="${m.content}"></audio>`;
-        else if (m.type === 'video_note') {
-            extraClass = 'has-circle';
-            content = `<video class="circle-msg" src="${m.content}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
+        else if (m.type === 'video_note') content = `<video class="circle-msg" src="${m.content}" autoplay loop muted playsinline onclick="this.muted = !this.muted"></video>`;
+
+        // --- Блок реакций ---
+        let reactionsHtml = '<div class="reaction-container">';
+        if (m.reactions) {
+            for (const [emoji, users] of Object.entries(m.reactions)) {
+                const amIReacted = users.includes(state.profile.id);
+                reactionsHtml += `
+                    <div class="reaction-badge ${amIReacted ? 'active' : ''}" onclick="toggleReaction('${m.id}', '${emoji}')">
+                        ${emoji} <span>${users.length}</span>
+                    </div>`;
+            }
         }
-        else if (m.type === 'video') content = `<video src="${m.content}" controls style="max-width:100%; border-radius:12px;"></video>`;
+        // Кнопка быстрого добавления (например, сердечко) или вызова меню
+        reactionsHtml += `<div class="add-reaction" onclick="showReactionMenu(event, '${m.id}')">+</div>`;
+        reactionsHtml += '</div>';
 
         const div = document.createElement('div');
-        div.className = `msg ${isMine ? 'out' : 'in'} ${extraClass}`;
+        div.className = `msg ${isMine ? 'out' : 'in'}`;
         
-        let senderLabel = '';
-        if(activeChatType === 'group' && !isMine) {
-            senderLabel = `<div style="font-size:10px; color:var(--blue); margin-bottom:2px;">${m.senderName || 'User'}</div>`;
-        }
-
-        // --- ЛОГИКА ГАЛОЧЕК ---
         let statusHtml = '';
         if (isMine && activeChatType === 'user') {
-            const isRead = m.time <= partnerLastRead;
-            statusHtml = isRead 
+            statusHtml = m.time <= partnerLastRead 
                 ? '<i class="fas fa-check-double status-icon read"></i>' 
                 : '<i class="fas fa-check status-icon"></i>';
         }
 
         div.innerHTML = `
-            ${senderLabel}
-            ${content}
+            ${activeChatType === 'group' && !isMine ? `<div class="sender-name">${m.senderName}</div>` : ''}
+            <div class="msg-content">${content}</div>
+            ${reactionsHtml}
             <div class="msg-meta">
                 ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                 ${statusHtml}
             </div>
         `;
         
-        if (isMine) {
-            div.oncontextmenu = (e) => { e.preventDefault(); if(confirm('Удалить?')) deleteMessage(m.id); };
-        }
+        // Удаление по правому клику (или долгому нажатию)
+        div.oncontextmenu = (e) => { 
+            e.preventDefault(); 
+            if(isMine && confirm('Удалить сообщение?')) deleteMessage(m.id); 
+        };
+
         list.appendChild(div);
     });
-    setTimeout(() => list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' }), 100);
+    list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
 }
+
+// Простое меню выбора быстрых реакций
+function showReactionMenu(e, msgId) {
+    e.stopPropagation();
+    const quickEmojis = ['❤️', '👍', '🔥', '😂', '😮', '😢'];
+    const menu = document.createElement('div');
+    menu.className = 'quick-reaction-menu';
+    // Позиционируем меню рядом с курсором/нажатием
+    menu.style.left = e.pageX + 'px';
+    menu.style.top = e.pageY + 'px';
+    
+    quickEmojis.forEach(emoji => {
+        const btn = document.createElement('span');
+        btn.innerText = emoji;
+        btn.onclick = () => { toggleReaction(msgId, emoji); menu.remove(); };
+        menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+    // Удаляем меню при клике в любое другое место
+    setTimeout(() => {
+        window.onclick = () => { menu.remove(); window.onclick = null; };
+    }, 100);
+}
+
 
 
 async function sendMsg(payload = null) {
@@ -865,10 +893,55 @@ function viewAvatarFromOptions() {
 function viewFullScreen(src) { document.getElementById('lightboxImg').src=src; document.getElementById('lightbox').classList.add('open'); document.getElementById('lightbox').style.display='flex'; }
 function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); setTimeout(()=>document.getElementById('lightbox').style.display='none',300); }
 function openModal(id) { document.getElementById(id).style.display='flex'; setTimeout(()=>document.getElementById(id).classList.add('open'),10); }
+async function toggleReaction(msgId, emoji) {
+    const msgRef = db.collection("messages").doc(msgId);
+    
+    try {
+        const doc = await msgRef.get();
+        if (!doc.exists) return;
+
+        const data = doc.data();
+        let reactions = data.reactions || {};
+
+        if (!reactions[emoji]) {
+            reactions[emoji] = [];
+        }
+
+        const myId = state.profile.id;
+        if (reactions[emoji].includes(myId)) {
+            // Если уже ставил — убираем
+            reactions[emoji] = reactions[emoji].filter(id => id !== myId);
+            if (reactions[emoji].length === 0) delete reactions[emoji];
+        } else {
+            // Если не ставил — добавляем
+            reactions[emoji].push(myId);
+        }
+
+        await msgRef.update({ reactions });
+    } catch (e) {
+        console.error("Ошибка реакции:", e);
+    }
+}
+
 function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m=>{ m.classList.remove('open'); setTimeout(()=>m.style.display='none',300); }); }
 function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
 function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,2500); }
 function copyMyId() { navigator.clipboard.writeText(state.profile.shortId); showToast('ID скопирован'); }
+
+// Переключение видимости пикера
+function toggleEmojiPicker() {
+    const picker = document.getElementById('emojiPickerContainer');
+    picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
+}
+
+// Обработка выбора эмодзи
+document.querySelector('emoji-picker').addEventListener('emoji-click', event => {
+    const input = document.getElementById('msgInput');
+    input.value += event.detail.unicode; // Добавляем эмодзи в поле ввода
+    toggleEmojiPicker(); // Закрываем
+    input.focus();
+});
+
 
 document.querySelectorAll('.modal-overlay').forEach(el => { el.addEventListener('click', e => { if(e.target===el && el.id!=='modalWelcome') closeModals(); }); });
 // Каждую минуту отправляем в базу, что мы еще тут

@@ -1,21 +1,22 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Маранючок v1.4.5</title>
-    <meta name="description" content="Маранючок — быстрый и безопасный мессенджер для общения с друзьями. Групповые чаты, видеосообщения и мгновенный обмен фото.">
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+	<title>Маранючок v1.4.5</title>
+	<meta name="description" content="Маранючок — быстрый и безопасный мессенджер для общения с друзьями. Групповые чаты, видеосообщения и мгновенный обмен фото.">
+	<meta name="keywords" content="мессенджер, чат, общение, Маранючок, онлайн чат, видеосообщения, бесплатный мессенджер, миринюк, миренюк, маранючище, маранюкчище, миринюк, миранюк, миронюк, маринюк, питух, пеньтюх, жирбон, жир">
+	<meta name="author" content="Маранючок">
 
-    <meta name="keywords" content="мессенджер, чат, общение, Маранючок, онлайн чат, видеосообщения, бесплатный мессенджер,миринюк, миренюк, маранючище, маранюкчище, миринюк, миранюк, миронюк, маринюк, питух, пеньтюх, жирбон, жир">
+	<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+	<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+	<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+	<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
+	<script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/index.js"></script>
 
-    <meta name="author" content="Маранючок">
+	
+	<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 
-    
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
     <style>
         :root {
@@ -71,6 +72,98 @@
         .btn-icon.rec { color: var(--red); animation: pulse 1s infinite; background: rgba(255,59,48,0.1); border-radius: 50%; }
 
         .fab { position: absolute; bottom: 20px; right: 20px; width: 56px; height: 56px; border-radius: 50%; background: var(--blue); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); border: none; cursor: pointer; z-index: 1000; transition: transform 0.2s; }
+		/* Контейнер для эмодзи-пикера */
+		#emojiPickerContainer {
+				display: none;
+				position: absolute;
+				bottom: 80px;
+				right: 20px;
+				z-index: 1000;
+				box-shadow: 0 5px 25px rgba(0,0,0,0.5);
+				border-radius: 12px;
+				overflow: hidden;
+		}
+
+		/* Список реакций под сообщением */
+		.reaction-container {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+				margin-top: 6px;
+				min-height: 20px;
+		}
+
+		/* Сама плашка реакции */
+		.reaction-badge {
+				background: rgba(255, 255, 255, 0.1);
+				padding: 2px 8px;
+				border-radius: 12px;
+				font-size: 13px;
+				cursor: pointer;
+				display: flex;
+				align-items: center;
+				gap: 4px;
+				border: 1px solid transparent;
+				transition: all 0.2s ease;
+		}
+
+		.reaction-badge:hover {
+				background: rgba(255, 255, 255, 0.2);
+		}
+
+		.reaction-badge.active {
+				background: rgba(0, 122, 255, 0.2);
+				border-color: #007aff;
+		}
+
+		.reaction-badge span {
+				font-size: 11px;
+				font-weight: bold;
+		}
+
+		/* Кнопка плюсика для реакций */
+		.add-reaction {
+				opacity: 0.4;
+				cursor: pointer;
+				padding: 0 4px;
+				font-size: 16px;
+				transition: opacity 0.2s;
+		}
+
+		.add-reaction:hover {
+				opacity: 1;
+		}
+
+		/* Быстрое меню реакций (всплывающее) */
+		.quick-reaction-menu {
+				position: fixed;
+				background: #2c2c2e;
+				border: 1px solid #444;
+				border-radius: 30px;
+				padding: 8px 14px;
+				display: flex;
+				gap: 12px;
+				box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+				z-index: 9999;
+				animation: popScale 0.2s ease-out;
+		}
+
+		@keyframes popScale {
+				0% { transform: scale(0.5); opacity: 0; }
+				100% { transform: scale(1); opacity: 1; }
+		}
+
+		.quick-reaction-menu span {
+				font-size: 24px;
+				cursor: pointer;
+				transition: transform 0.1s;
+		}
+
+		.quick-reaction-menu span:hover {
+				transform: scale(1.3);
+		}
+
+
         .fab-menu { position: absolute; bottom: 85px; right: 20px; display: none; flex-direction: column; gap: 10px; z-index: 1000; }
         .fab-menu.open { display: flex; animation: popIn 0.2s; }
         .fab-item { background: var(--bg); color: var(--text); padding: 12px 18px; border-radius: 14px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 10px; cursor: pointer; border: 1px solid var(--border); font-weight: 500; }
@@ -164,14 +257,35 @@
     
     <div class="messages" id="messages"></div>
 
-    <div class="input-bar" id="inputBar">
-        <label class="btn-icon"><i class="fas fa-paperclip"></i><input type="file" hidden onchange="sendFile(this)"></label>
-        <textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this); setTypingStatus()"></textarea>
-        <button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')"><i class="fas fa-microphone"></i></button>
-        <button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')"><i class="fas fa-camera"></i></button>
-        <button class="btn-icon" onclick="sendMsg()"><i class="fas fa-paper-plane"></i></button>
-    </div>
+<div class="input-bar" id="inputBar">
+		<div id="emojiPickerContainer">
+				<emoji-picker class="dark"></emoji-picker>
+		</div>
+
+		<button class="btn-icon" onclick="toggleEmojiPicker()">
+				<i class="far fa-smile"></i>
+		</button>
+
+		<label class="btn-icon">
+				<i class="fas fa-paperclip"></i>
+				<input type="file" hidden onchange="sendFile(this)">
+		</label>
+
+		<textarea id="msgInput" class="input-field" placeholder="Сообщение..." rows="1" oninput="autoResize(this); setTypingStatus()"></textarea>
+
+		<button id="voiceBtn" class="btn-icon" onclick="toggleRecord('audio')">
+				<i class="fas fa-microphone"></i>
+		</button>
+		
+		<button id="videoBtn" class="btn-icon" onclick="toggleRecord('video_note')">
+				<i class="fas fa-camera"></i>
+		</button>
+
+		<button class="btn-icon" onclick="sendMsg()">
+				<i class="fas fa-paper-plane"></i>
+		</button>
 </div>
+
 
 <div class="modal-overlay" id="modalWelcome">
     <div class="modal">
