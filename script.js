@@ -63,7 +63,7 @@ window.onload = () => {
     });
 };
 // Переменные для 
-function listenToData(myUid) {
+async function listenToData(myUid) {
     // 1. ГРУППЫ
     if (groupsUnsubscribe) groupsUnsubscribe();
     groupsUnsubscribe = db.collection("groups")
@@ -272,7 +272,7 @@ function getChatId(user1, user2) {
     return [user1, user2].sort().join('_');
 }
 
-function loadChat(targetId, type = 'user') {
+async function loadChat(targetId, type = 'user') {
     activeChat = targetId;
     activeChatType = type;
     
@@ -370,7 +370,7 @@ function loadChat(targetId, type = 'user') {
 
 
 
-function renderMessages(msgs) {
+async function renderMessages(msgs) {
 		const container = document.getElementById('messages');
 		if (!container) return;
 		container.innerHTML = '';
@@ -898,7 +898,7 @@ async function toggleReaction(msgId, emoji) {
 }
 
 // Быстрое меню реакций (всплывашка)
-function showReactionMenu(e, msgId) {
+async function showReactionMenu(e, msgId) {
 		e.stopPropagation();
 		// Удаляем старое меню, если оно есть
 		const oldMenu = document.querySelector('.quick-reaction-menu');
@@ -932,9 +932,9 @@ function showReactionMenu(e, msgId) {
 
 
 function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m=>{ m.classList.remove('open'); setTimeout(()=>m.style.display='none',300); }); }
-function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
+async function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
 function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,2500); }
-function copyMyId() { navigator.clipboard.writeText(state.profile.shortId); showToast('ID скопирован'); }
+async function copyMyId() { navigator.clipboard.writeText(state.profile.shortId); showToast('ID скопирован'); }
 
 // Переключение видимости пикера (исправлено)
 function toggleEmojiPicker(e) {
