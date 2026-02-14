@@ -344,27 +344,27 @@ async function loadChat(targetId, type = 'user') {
             }).catch(()=>{});
         }
 
-        // Логика отображения "Печатает..."
-        const typingData = data.typing || {};
-        const typers = Object.keys(typingData).filter(uid => typingData[uid] === true && uid !== state.profile.id);
+        // Логика отображения "Печатает..." - ОТКЛЮЧЕНА
+        // const typingData = data.typing || {};
+        // const typers = Object.keys(typingData).filter(uid => typingData[uid] === true && uid !== state.profile.id);
 
-        if (typers.length > 0) {
-            statusEl.innerText = type === 'group' ? "Кто-то печатает..." : "Печатает...";
-            statusEl.style.color = "#00ff00";
+        // if (typers.length > 0) {
+        //     statusEl.innerText = type === 'group' ? "Кто-то печатает..." : "Печатает...";
+        //     statusEl.style.color = "#00ff00";
+        // } else {
+        statusEl.style.color = "";
+        // Возвращаем исходный статус
+        if (type === 'group') {
+            statusEl.innerText = `${data.members ? data.members.length : 0} участников`;
         } else {
-            statusEl.style.color = "";
-            // Возвращаем исходный статус
-            if (type === 'group') {
-                statusEl.innerText = `${data.members ? data.members.length : 0} участников`;
-            } else {
-                // Для лички берем актуальный lastSeen партнера
-                const partner = state.contacts.find(c => c.id === targetId);
-                if (partner) {
-                    const isOnline = (Date.now() - partner.lastSeen) < 120000;
-                    statusEl.innerText = isOnline ? 'В сети' : "Был(а) в сети: " + formatLastSeen(partner.lastSeen);
-                }
+            // Для лички берем актуальный lastSeen партнера
+            const partner = state.contacts.find(c => c.id === targetId);
+            if (partner) {
+                const isOnline = (Date.now() - partner.lastSeen) < 120000;
+                statusEl.innerText = isOnline ? 'В сети' : "Был(а) в сети: " + formatLastSeen(partner.lastSeen);
             }
         }
+        // }
     });
 }
 

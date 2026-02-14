@@ -46,7 +46,7 @@
 		video.circle-msg { width: 220px; height: 220px; border-radius: 50%; object-fit: cover; border: 3px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); background: #000; }
 
 		.contact-list { flex: 1; overflow-y: auto; scrollbar-width: thin; }
-		.contact { padding: 12px 15px; display: flex; gap: 12px; align-items: center; cursor: pointer; transition: background 0.2s; position: relative; }
+		.contact { padding: 12px 15px; display: flex; gap: 12px; align-items: center; cursor: pointer; position: relative; }
 		.contact:hover { background: var(--sec); }
 		.contact.active { background: var(--sec); }
 		
@@ -206,6 +206,11 @@
 				.chat-wrap { position: absolute; inset: 0; transform: translateX(100%); }
 				.chat-wrap.active { transform: translateX(0); }
 				.sidebar.hidden { transform: translateX(-30%); opacity: 0; pointer-events: none; }
+				.back-btn { display: none !important; }
+		}
+
+		@media (min-width: 769px) {
+				.back-btn { display: flex !important; }
 		}
 </style>
 
@@ -243,7 +248,7 @@
 
 <div class="chat-wrap" id="chatWrap">
     <div class="header">
-        <button class="btn-icon" onclick="closeChat()"><i class="fas fa-chevron-left"></i></button>
+        <button class="btn-icon back-btn" onclick="closeChat()" style="display:none;"><i class="fas fa-chevron-left"></i></button>
         <img id="chatAvatar" class="avatar" src="" onclick="viewFullScreen(this.src)">
         <div style="flex:1; margin-left: 10px; cursor:pointer; overflow:hidden;" onclick="openContactOptions(activeChat)">
             <div id="chatName" style="font-weight:600">Выберите чат</div>
