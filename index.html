@@ -76,7 +76,9 @@
 		.btn-icon.rec { color: var(--red); animation: pulse 1s infinite; background: rgba(255,59,48,0.1); border-radius: 50%; }
 
 		#emojiPickerContainer {
-				display: none;
+				visibility: hidden;
+				opacity: 0;
+				transition: opacity 0.2s;
 				position: absolute;
 				bottom: 70px;
 				left: 10px;
@@ -84,6 +86,12 @@
 				box-shadow: 0 5px 25px rgba(0,0,0,0.5);
 				border-radius: 12px;
 				overflow: hidden;
+		}
+		
+		#emojiPickerContainer.open {
+				visibility: visible;
+				opacity: 1;
+		}
 		}
 
 		.reaction-container {
@@ -260,7 +268,7 @@
 <div class="messages" id="messages"></div>
 
 <div class="input-bar" id="inputBar">
-				<div id="emojiPickerContainer" style="display: none;">
+<div id="emojiPickerContainer">
 						<emoji-picker class="dark"></emoji-picker>
 				</div>
 

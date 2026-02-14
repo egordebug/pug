@@ -79,6 +79,8 @@ async function listenToData(myUid) {
 
     // 2. ЛИЧНЫЕ ЧАТЫ
     if (chatsUnsubscribe) chatsUnsubscribe();
+    let lastContactUpdate = 0;
+    let pendingContactUpdate = null;
     chatsUnsubscribe = db.collection("chats")
         .where("members", "array-contains", myUid)
         .onSnapshot(async (snapshot) => {
@@ -114,7 +116,12 @@ async function listenToData(myUid) {
                     });
 
                     state.contacts.sort((a, b) => (b.lastMsgTime || 0) - (a.lastMsgTime || 0));
-                    renderContactList();
+                    
+                    // Буферизуем обновления чтобы не было спама
+                    clearTimeout(pendingContactUpdate);
+                    pendingContactUpdate = setTimeout(() => {
+                        renderContactList();
+                    }, 100);
                     
                     // ВАЖНО: Если открыт чат, перерисовываем сообщения, чтобы галочки стали синими
                     if (activeChat && activeChatType === 'user') {
@@ -484,9 +491,11 @@ async function sendMsg(payload = null) {
 
 
 // === СПИСОК КОНТАКТОВ И ГРУПП ===
+// Кеш для отслеживания текущего содержимого
+let contactListCache = {};
+
 function renderContactList() {
     const list = document.getElementById('contactList');
-    list.innerHTML = '';
     
     // Объединяем группы и контакты для удобства рендеринга
     const allChats = [
@@ -494,28 +503,26 @@ function renderContactList() {
         ...state.contacts.filter(c => c.id !== state.profile.id).map(c => ({ ...c, isGroup: false }))
     ];
 
+    // Если контактов нет совсем - очищаем
+    if (allChats.length === 0) {
+        list.innerHTML = '';
+        contactListCache = {};
+        return;
+    }
+
+    // Обновляем или создаём контакты
     allChats.forEach(item => {
         const isGroup = item.isGroup;
         const id = item.id;
+        const cacheKey = id;
         
         // --- ЛОГИКА ТОЧКИ ---
-        // Получаем документ чата/группы, чтобы вытащить время
         const chatId = isGroup ? id : getChatId(state.profile.id, id);
-        
-        // ВАЖНО: Мы будем искать данные о времени в state.groups или доп. массиве.
-        // Но проще всего проверить наличие непрочитанных, если эти данные приходят из Snapshot
-        // Допустим, мы храним время последнего захода в item.lastRead
         const lastMsgTime = item.lastMsgTime || 0;
         const myLastRead = (item.lastRead && item.lastRead[state.profile.id]) ? item.lastRead[state.profile.id] : 0;
-        
-        // Если последнее сообщение новее, чем наше время прочтения — рисуем точку
         const hasUnread = lastMsgTime > myLastRead && activeChat !== id;
 
         const isOnline = !isGroup && item.lastSeen && (Date.now() - item.lastSeen) < 120000;
-
-        const div = document.createElement('div');
-        div.className = `contact ${activeChat === id ? 'active' : ''}`;
-        div.style.position = 'relative'; // Нужно для позиционирования точки
 
         let statusHtml = '';
         if (isGroup) {
@@ -526,24 +533,68 @@ function renderContactList() {
                 : `<span style="opacity: 0.6;">Был(а): ${formatLastSeen(item.lastSeen)}</span>`;
         }
 
-        div.innerHTML = `
-            <div style="position: relative;">
-                <img src="${item.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${item.avatar}')">
-                ${isOnline ? '<div style="position:absolute; bottom:2px; right:2px; width:12px; height:12px; background:#00ff00; border:2px solid var(--bg); border-radius:50%;"></div>' : ''}
-            </div>
-            <div class="contact-info" onclick="loadChat('${id}', '${isGroup ? 'group' : 'user'}')">
-                <div class="contact-name">
-                    ${isGroup ? '<i class="fas fa-users" style="font-size:12px; margin-right:5px; color:var(--blue)"></i>' : ''}
-                    ${item.name}
+        // Проверяем если элемент уже существует
+        let div = document.getElementById(`contact-${cacheKey}`);
+        
+        if (div && contactListCache[cacheKey] && contactListCache[cacheKey].avatar === item.avatar) {
+            // Элемент есть и аватарка не изменилась - только обновляем текст
+            div.classList.toggle('active', activeChat === id);
+            div.querySelector('.contact-name').innerHTML = `
+                ${isGroup ? '<i class="fas fa-users" style="font-size:12px; margin-right:5px; color:var(--blue)"></i>' : ''}
+                ${item.name}
+            `;
+            div.querySelector('.contact-last').innerHTML = statusHtml;
+            
+            // Обновляем точку непрочитанных
+            let unreadDot = div.querySelector('.unread-dot');
+            if (hasUnread && !unreadDot) {
+                const dot = document.createElement('div');
+                dot.className = 'unread-dot';
+                div.appendChild(dot);
+            } else if (!hasUnread && unreadDot) {
+                unreadDot.remove();
+            }
+        } else {
+            // Создаём элемент заново только если его нет или изменилась аватарка
+            if (div) div.remove();
+            
+            div = document.createElement('div');
+            div.id = `contact-${cacheKey}`;
+            div.className = `contact ${activeChat === id ? 'active' : ''}`;
+            div.style.position = 'relative';
+            
+            div.innerHTML = `
+                <div style="position: relative;">
+                    <img src="${item.avatar}" class="avatar" onclick="event.stopPropagation(); viewFullScreen('${item.avatar}')">
+                    ${isOnline ? '<div style="position:absolute; bottom:2px; right:2px; width:12px; height:12px; background:#00ff00; border:2px solid var(--bg); border-radius:50%;"></div>' : ''}
                 </div>
-                <div class="contact-last">${statusHtml}</div>
-            </div>
-            ${hasUnread ? '<div class="unread-dot"></div>' : ''}
-            <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${id}')">
-                <i class="fas fa-ellipsis-v"></i>
-            </div>
-        `;
-        list.appendChild(div);
+                <div class="contact-info" onclick="loadChat('${id}', '${isGroup ? 'group' : 'user'}')">
+                    <div class="contact-name">
+                        ${isGroup ? '<i class="fas fa-users" style="font-size:12px; margin-right:5px; color:var(--blue)"></i>' : ''}
+                        ${item.name}
+                    </div>
+                    <div class="contact-last">${statusHtml}</div>
+                </div>
+                ${hasUnread ? '<div class="unread-dot"></div>' : ''}
+                <div class="contact-opt-btn" onclick="event.stopPropagation(); openContactOptions('${id}')">
+                    <i class="fas fa-ellipsis-v"></i>
+                </div>
+            `;
+            list.appendChild(div);
+        }
+        
+        // Сохраняем в кеш
+        contactListCache[cacheKey] = { avatar: item.avatar };
+    });
+    
+    // Удаляем элементы которых больше нет в allChats
+    const presentIds = new Set(allChats.map(c => c.id));
+    Object.keys(contactListCache).forEach(cacheKey => {
+        if (!presentIds.has(cacheKey)) {
+            const el = document.getElementById(`contact-${cacheKey}`);
+            if (el) el.remove();
+            delete contactListCache[cacheKey];
+        }
     });
 }
 
@@ -679,26 +730,35 @@ async function checkUrlParams() {
     }
 }
 const messaging = firebase.messaging();
-const VAPID_KEY = 'yTpqd1mewy_D9gxuByV8o4SwJqz38qSk8RLcZWJPgNs';
+const VAPID_KEY = 'BCyqF1Alqm3Ffl2bo3D4kFwruMc6zQQRweenDRF1xSQkeGS4NX1TNcREA6YrWdJUP3QEsb2KUDd6VQeuFwXafP8';
 
-// 2. Твоя функция (добавил параметр uid для надежности)
-// Добавь (uid) в скобки
 async function initPush(uid) { 
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-            const token = await messaging.getToken({ vapidKey: VAPID_KEY });
-            
-            if (token) {
-                // Используем переданный uid, чтобы точно попасть в нужный документ
-                await db.collection("users").doc(uid).update({
-                    fcmToken: token
-                });
-                console.log("FCM Токен сохранен для:", uid);
+            try {
+                const token = await messaging.getToken({ vapidKey: VAPID_KEY });
+                
+                if (token) {
+                    await db.collection("users").doc(uid).update({
+                        fcmToken: token
+                    });
+                    console.log("✓ FCM Токен сохранен");
+                } else {
+                    console.warn("⚠ Не удалось получить FCM токен");
+                }
+            } catch (tokenError) {
+                console.error('❌ Ошибка получения FCM токена:', tokenError.message);
+                // Если ошибка про VAPID key, это значит конфиг неправильный
+                if (tokenError.message.includes('VAPID') || tokenError.message.includes('Invalid')) {
+                    console.warn('Подсказка: Проверьте VAPID_KEY в коде и в Firebase Console');
+                }
             }
+        } else {
+            console.log('Пользователь запретил уведомления');
         }
     } catch (err) {
-        console.error('Ошибка пушей:', err);
+        console.error('Ошибка инициализации пушей:', err.message);
     }
 }
 
@@ -932,7 +992,25 @@ async function showReactionMenu(e, msgId) {
 
 
 function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m=>{ m.classList.remove('open'); setTimeout(()=>m.style.display='none',300); }); }
-async function closeChat() { document.getElementById('chatWrap').classList.remove('active'); document.getElementById('sidebar').classList.remove('hidden'); if(currentUnsubscribe)currentUnsubscribe(); activeChat=null; renderContactList(); }
+async function closeChat() { 
+    // Очищаем интерфейс чата
+    document.getElementById('messages').innerHTML = '';
+    document.getElementById('chatName').innerText = 'Выберите чат';
+    document.getElementById('chatStatus').innerText = 'Ожидание...';
+    document.getElementById('chatStatus').style.color = '';
+    document.getElementById('chatAvatar').src = '';
+    
+    // Скрываем чат и показываем сайдбар
+    document.getElementById('chatWrap').classList.remove('active'); 
+    document.getElementById('sidebar').classList.remove('hidden'); 
+    
+    // Отписываемся от слушателей
+    if(currentUnsubscribe)currentUnsubscribe(); 
+    activeChat=null; 
+    activeChatType=null;
+    
+    renderContactList(); 
+}
 function showToast(m) { const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,2500); }
 async function copyMyId() { navigator.clipboard.writeText(state.profile.shortId); showToast('ID скопирован'); }
 
@@ -940,14 +1018,14 @@ async function copyMyId() { navigator.clipboard.writeText(state.profile.shortId)
 function toggleEmojiPicker(e) {
 		if (e) e.stopPropagation(); // Чтобы клик по кнопке не закрывал пикер сразу
 		const picker = document.getElementById('emojiPickerContainer');
-		const isHidden = picker.style.display === 'none' || picker.style.display === '';
-		picker.style.display = isHidden ? 'block' : 'none';
+		const isOpen = picker.classList.contains('open');
+		picker.classList.toggle('open');
 
-		if (isHidden) {
+		if (!isOpen) {
 				// Закрытие при клике мимо
 				const closeHandler = (event) => {
 						if (!picker.contains(event.target) && !event.target.closest('.btn-icon')) {
-								picker.style.display = 'none';
+								picker.classList.remove('open');
 								document.removeEventListener('click', closeHandler);
 						}
 				};
